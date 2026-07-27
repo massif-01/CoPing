@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1254"
+  height="1254"
+  viewBox="0 0 1254 1254"
+  fill="none"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">CoPing orbit mark</title>
+  <desc id="desc">
+    A coral mark formed by a large circle, a curved connecting stroke, and a
+    smaller circle on a transparent background.
+  </desc>
+
+  <g fill="#FD7B60" stroke="#FD7B60">
+    <path
+      fill="none"
+      d="
+        M 400 450
+        C 326 550, 305 680, 354 789
+        C 429 956, 626 1033, 811 950
+      "
+      stroke-width="31"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <circle cx="489" cy="383" r="125" stroke="none"/>
+    <circle cx="894" cy="892" r="59" stroke="none"/>
+  </g>
+</svg>

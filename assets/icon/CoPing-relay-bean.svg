@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">CoPing relay bean icon</title>
+  <desc id="desc">
+    A dark rounded relay shape surrounding a coral ping dot on a cream app icon.
+  </desc>
+
+  <!-- Sampled from the generated reference: RGB(252, 246, 237). -->
+  <rect width="1024" height="1024" rx="224" fill="#FCF6ED"/>
+
+  <!-- Main relay form. -->
+  <path
+    fill="#353433"
+    d="
+      M 150 330
+      C 115 355, 95 400, 95 475
+      C 95 620, 180 710, 330 720
+      L 720 720
+      C 855 720, 930 645, 935 530
+      C 940 425, 885 360, 805 350
+      C 735 340, 687 365, 650 420
+      C 630 450, 620 475, 600 482
+      C 580 489, 558 472, 568 448
+      C 598 374, 558 326, 488 318
+      L 250 305
+      C 205 302, 175 310, 150 330
+      Z
+    "
+  />
+
+  <!-- Cream notch and coral ping. -->
+  <circle cx="600" cy="482" r="62" fill="#FCF6ED"/>
+  <circle cx="600" cy="482" r="42" fill="#F4714E"/>
+</svg>
