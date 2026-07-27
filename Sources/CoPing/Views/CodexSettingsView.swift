@@ -6,85 +6,74 @@ struct CodexSettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                GlassCard {
-                    VStack(spacing: 12) {
-                        LabeledContent("ChatGPT.app") {
-                            Label(
-                                model.codexDetected
-                                    ? AppText.detected
-                                    : AppText.notDetected,
-                                systemImage: model.codexDetected
-                                    ? "checkmark.circle.fill"
-                                    : "xmark.circle.fill"
-                            )
-                            .foregroundStyle(
-                                model.codexDetected
-                                    ? Color(nsColor: .systemGreen)
-                                    : Color(nsColor: .systemRed)
-                            )
-                        }
-
-                        Divider()
-
-                        LabeledContent(AppText.connectionStatusLabel) {
-                            Label(
-                                model.connectionStatus.label,
-                                systemImage: connectionIcon
-                            )
-                            .foregroundStyle(connectionColor)
-                        }
-                    }
-                }
-
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 10) {
+        SettingsPage("Codex") {
+            Form {
+                Section(AppText.detectionSection) {
+                    LabeledContent("ChatGPT.app") {
                         Label(
-                            AppText.firstConnectionSection,
-                            systemImage: "link"
+                            model.codexDetected
+                                ? AppText.detected
+                                : AppText.notDetected,
+                            systemImage: model.codexDetected
+                                ? "checkmark.circle.fill"
+                                : "xmark.circle.fill"
                         )
-                        .font(.headline)
+                        .foregroundStyle(
+                            model.codexDetected
+                                ? Color(nsColor: .systemGreen)
+                                : Color(nsColor: .systemRed)
+                        )
+                    }
 
-                        Text(AppText.firstConnectionHelp)
-                            .font(.callout)
-
-                        Text(AppText.firstConnectionVerificationHelp)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    LabeledContent(AppText.connectionStatusLabel) {
+                        Label(
+                            model.connectionStatus.label,
+                            systemImage: connectionIcon
+                        )
+                        .foregroundStyle(connectionColor)
                     }
                 }
 
-                HStack {
-                    Button(
-                        model.connectionStatus == .disconnected
-                            ? AppText.connectCodex
-                            : AppText.repairConnection
-                    ) {
-                        model.connectCodex()
-                    }
-                    .copingPrimaryButtonStyle()
-                    .disabled(model.isBusy || !model.codexDetected)
+                Section(AppText.firstConnectionSection) {
+                    Text(AppText.firstConnectionHelp)
+                        .font(.callout)
 
-                    Button(AppText.reopenReviewTerminal) {
-                        model.openHookReview()
-                    }
-                    .copingSecondaryButtonStyle()
-                    .disabled(!model.codexDetected)
-
-                    Spacer()
-
-                    Button(AppText.disconnect, role: .destructive) {
-                        model.disconnectCodex()
-                    }
-                    .copingSecondaryButtonStyle()
-                    .disabled(model.connectionStatus == .disconnected)
+                    Text(AppText.firstConnectionVerificationHelp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .controlSize(.large)
+
+                Section {
+                    HStack {
+                        Button(
+                            model.connectionStatus == .disconnected
+                                ? AppText.connectCodex
+                                : AppText.repairConnection
+                        ) {
+                            model.connectCodex()
+                        }
+                        .copingPrimaryButtonStyle()
+                        .disabled(model.isBusy || !model.codexDetected)
+
+                        Button(AppText.reopenReviewTerminal) {
+                            model.openHookReview()
+                        }
+                        .copingSecondaryButtonStyle()
+                        .disabled(!model.codexDetected)
+
+                        Spacer()
+
+                        Button(AppText.disconnect, role: .destructive) {
+                            model.disconnectCodex()
+                        }
+                        .copingSecondaryButtonStyle()
+                        .disabled(model.connectionStatus == .disconnected)
+                    }
+                    .controlSize(.regular)
+                }
             }
-            .padding(24)
-            .frame(maxWidth: 680)
-            .frame(maxWidth: .infinity)
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
     }
 

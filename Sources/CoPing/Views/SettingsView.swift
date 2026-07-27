@@ -7,33 +7,60 @@ struct SettingsView: View {
     @State private var selection: SettingsSection = .general
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selection) { section in
-                Label(section.title, systemImage: section.systemImage)
-                    .tag(section)
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 30, height: 30)
+                        .accessibilityHidden(true)
+
+                    Text("CoPing")
+                        .font(.headline)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 16)
+                .padding(.bottom, 10)
+
+                List(SettingsSection.allCases, selection: $selection) { section in
+                    Label(section.title, systemImage: section.systemImage)
+                        .tag(section)
+                }
+                .listStyle(.sidebar)
+                .accessibilityLabel(AppText.settingsSidebarAccessibilityLabel)
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
-            .accessibilityLabel(AppText.settingsSidebarAccessibilityLabel)
+            .navigationSplitViewColumnWidth(168)
         } detail: {
             detailView
-                .navigationTitle(selection.title)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.ultraThinMaterial)
         }
-        .frame(minWidth: 760, minHeight: 520)
+        .copingSettingsToolbar()
+        .frame(width: 760, height: 500)
         .background(WindowTitleUpdater(title: AppText.settingsWindowTitle))
-        .safeAreaInset(edge: .bottom) {
-            if let message = model.statusMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 9)
-                    .background(.regularMaterial)
+        .overlay(alignment: .topTrailing) {
+            if let notice = model.notice {
+                SettingsNoticeView(notice: notice) {
+                    model.dismissNotice(id: notice.id)
+                }
+                .padding(20)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
+        }
+        .animation(.snappy, value: model.notice?.id)
+        .task(id: model.notice?.id) {
+            guard
+                let notice = model.notice,
+                notice.kind != .error
+            else {
+                return
+            }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            model.dismissNotice(id: notice.id)
         }
     }
 

@@ -5,67 +5,50 @@ struct BarkSettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(
-                            AppText.serviceSection,
-                            systemImage: "network"
-                        )
-                        .font(.headline)
+        SettingsPage("Bark") {
+            Form {
+                Section(AppText.serviceSection) {
+                    TextField(
+                        AppText.httpsServerAddress,
+                        text: $model.baseURLString
+                    )
 
-                        TextField(
-                            AppText.httpsServerAddress,
-                            text: $model.baseURLString
-                        )
-                        .textFieldStyle(.roundedBorder)
-
-                        Text(AppText.barkServerHelp)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(AppText.barkServerHelp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(
-                            AppText.deviceSection,
-                            systemImage: "iphone"
-                        )
-                        .font(.headline)
+                Section(AppText.deviceSection) {
+                    SecureField(
+                        AppText.deviceKeyOrURL,
+                        text: $model.deviceKey
+                    )
 
-                        SecureField(
-                            AppText.deviceKeyOrURL,
-                            text: $model.deviceKey
-                        )
-                        .textFieldStyle(.roundedBorder)
-
-                        Text(AppText.deviceKeyHelp)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(AppText.deviceKeyHelp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                HStack {
-                    Spacer()
+                Section {
+                    HStack {
+                        Spacer()
 
-                    Button(AppText.save) {
-                        model.saveBarkSettings()
-                    }
-                    .copingSecondaryButtonStyle()
+                        Button(AppText.save) {
+                            model.saveBarkSettings()
+                        }
+                        .copingSecondaryButtonStyle()
 
-                    Button(AppText.saveAndSendTest) {
-                        model.sendTestNotification()
+                        Button(AppText.saveAndSendTest) {
+                            model.sendTestNotification()
+                        }
+                        .copingPrimaryButtonStyle()
+                        .disabled(model.isBusy)
                     }
-                    .copingPrimaryButtonStyle()
-                    .disabled(model.isBusy)
+                    .controlSize(.regular)
                 }
-                .controlSize(.large)
             }
-            .padding(24)
-            .frame(maxWidth: 680)
-            .frame(maxWidth: .infinity)
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
     }
 }

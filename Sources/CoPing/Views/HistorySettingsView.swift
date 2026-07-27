@@ -6,38 +6,10 @@ struct HistorySettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(spacing: 16) {
-            if model.records.isEmpty {
-                ContentUnavailableView(
-                    AppText.noNotificationHistory,
-                    systemImage: "bell.slash",
-                    description: Text(AppText.historyPrivacyHelp)
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    GlassCard {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(model.records.enumerated()), id: \.element.id) {
-                                index,
-                                record in
-                                historyRow(record)
-
-                                if index < model.records.count - 1 {
-                                    Divider()
-                                        .padding(.leading, 34)
-                                }
-                            }
-                        }
-                    }
-                    .padding(24)
-                }
-            }
-
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(AppText.historyLimit)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(AppText.historyTab)
+                    .font(.title2.weight(.semibold))
 
                 Spacer()
 
@@ -47,8 +19,31 @@ struct HistorySettingsView: View {
                 .copingSecondaryButtonStyle()
                 .disabled(model.records.isEmpty)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 12)
+
+            if model.records.isEmpty {
+                ContentUnavailableView(
+                    AppText.noNotificationHistory,
+                    systemImage: "bell.slash",
+                    description: Text(AppText.historyPrivacyHelp)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(model.records) { record in
+                    historyRow(record)
+                        .listRowBackground(Color.clear)
+                }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+            }
+
+            Text(AppText.historyLimit)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 12)
         }
     }
 
@@ -61,7 +56,6 @@ struct HistorySettingsView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(eventName(record.eventType)) · \(record.projectName)")
-                    .foregroundStyle(.primary)
 
                 if let detail = record.detail {
                     Text(AppText.localizedHistoryDetail(detail))
@@ -76,7 +70,7 @@ struct HistorySettingsView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 7)
     }
 
     private func eventName(_ type: CodexEvent.EventType) -> String {

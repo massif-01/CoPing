@@ -27,52 +27,24 @@ struct MenuContentView: View {
                 Spacer()
             }
 
-            GlassCard(clear: true) {
-                HStack(spacing: 12) {
-                    Image(systemName: statusIcon)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(statusColor)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(AppText.connectionSection)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(model.menuStatusText)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
-                    }
-
-                    Spacer()
-                }
-            }
-
             HStack(spacing: 10) {
-                Button {
-                    model.setNotificationsEnabled(!model.notificationsEnabled)
-                } label: {
-                    Label(
-                        model.notificationsEnabled
-                            ? AppText.pauseNotifications
-                            : AppText.resumeNotifications,
-                        systemImage: model.notificationsEnabled
-                            ? "pause.fill"
-                            : "play.fill"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .copingSecondaryButtonStyle()
+                Image(systemName: statusIcon)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(statusColor)
 
-                Button {
-                    openSettings()
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                } label: {
-                    Label(AppText.settings, systemImage: "gearshape")
-                        .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(AppText.connectionSection)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(model.menuStatusText)
+                        .font(.body.weight(.medium))
                 }
-                .copingPrimaryButtonStyle()
-                .keyboardShortcut(",", modifiers: .command)
+
+                Spacer()
             }
-            .controlSize(.large)
+            .padding(.vertical, 4)
+
+            menuActions
 
             Divider()
 
@@ -92,7 +64,48 @@ struct MenuContentView: View {
             }
         }
         .padding(16)
-        .frame(width: 330)
+        .frame(width: 310)
+    }
+
+    @ViewBuilder
+    private var menuActions: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 10) {
+                actionButtons
+            }
+        } else {
+            actionButtons
+        }
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 10) {
+            Button {
+                model.setNotificationsEnabled(!model.notificationsEnabled)
+            } label: {
+                Label(
+                    model.notificationsEnabled
+                        ? AppText.pauseNotifications
+                        : AppText.resumeNotifications,
+                    systemImage: model.notificationsEnabled
+                        ? "pause.fill"
+                        : "play.fill"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .copingSecondaryButtonStyle()
+
+            Button {
+                openSettings()
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            } label: {
+                Label(AppText.settings, systemImage: "gearshape")
+                    .frame(maxWidth: .infinity)
+            }
+            .copingSecondaryButtonStyle()
+            .keyboardShortcut(",", modifiers: .command)
+        }
+        .controlSize(.regular)
     }
 
     private var statusIcon: String {

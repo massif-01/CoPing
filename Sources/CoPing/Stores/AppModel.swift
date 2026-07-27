@@ -4,6 +4,18 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
+    struct Notice: Equatable, Identifiable {
+        enum Kind {
+            case success
+            case information
+            case error
+        }
+
+        let id = UUID()
+        let message: String
+        let kind: Kind
+    }
+
     enum ConnectionStatus {
         case disconnected
         case awaitingVerification
@@ -26,7 +38,7 @@ final class AppModel: ObservableObject {
     @Published var launchAtLogin: Bool
     @Published var languagePreference: AppLanguagePreference
     @Published var connectionStatus: ConnectionStatus
-    @Published var statusMessage: String?
+    @Published var notice: Notice?
     @Published var records: [DeliveryRecord]
     @Published var isBusy = false
 
@@ -65,7 +77,7 @@ final class AppModel: ObservableObject {
                 try socketServer.start()
             } catch {
                 connectionStatus = .error
-                statusMessage = AppText.eventListenerStartFailed
+                showNotice(AppText.eventListenerStartFailed, kind: .error)
             }
 
             if defaults.object(forKey: "didConfigureLoginItem") == nil {
@@ -100,9 +112,9 @@ final class AppModel: ObservableObject {
             deviceKey = configuration.deviceKey
             baseURLString = configuration.baseURL.absoluteString
             defaults.set(baseURLString, forKey: "barkBaseURL")
-            statusMessage = AppText.barkSettingsSaved
+            showNotice(AppText.barkSettingsSaved, kind: .success)
         } catch {
-            statusMessage = error.localizedDescription
+            showNotice(error.localizedDescription, kind: .error)
         }
     }
 
@@ -131,7 +143,7 @@ final class AppModel: ObservableObject {
     func connectCodex() {
         guard codexDetected else {
             connectionStatus = .error
-            statusMessage = AppText.chatGPTNotDetected
+            showNotice(AppText.chatGPTNotDetected, kind: .error)
             return
         }
         isBusy = true
@@ -141,10 +153,10 @@ final class AppModel: ObservableObject {
             defaults.set(false, forKey: "codexConnectionVerified")
             connectionStatus = .awaitingVerification
             try HookTrustLauncher().openReviewTerminal()
-            statusMessage = AppText.trustHooksStatus
+            showNotice(AppText.trustHooksStatus, kind: .information)
         } catch {
             connectionStatus = .error
-            statusMessage = error.localizedDescription
+            showNotice(error.localizedDescription, kind: .error)
         }
         isBusy = false
     }
@@ -152,9 +164,9 @@ final class AppModel: ObservableObject {
     func openHookReview() {
         do {
             try HookTrustLauncher().openReviewTerminal()
-            statusMessage = AppText.reviewFinishedStatus
+            showNotice(AppText.reviewFinishedStatus, kind: .information)
         } catch {
-            statusMessage = error.localizedDescription
+            showNotice(error.localizedDescription, kind: .error)
         }
     }
 
@@ -164,10 +176,10 @@ final class AppModel: ObservableObject {
             try helperInstaller.uninstall()
             defaults.set(false, forKey: "codexConnectionVerified")
             connectionStatus = .disconnected
-            statusMessage = AppText.disconnectedStatus
+            showNotice(AppText.disconnectedStatus, kind: .information)
         } catch {
             connectionStatus = .error
-            statusMessage = error.localizedDescription
+            showNotice(error.localizedDescription, kind: .error)
         }
     }
 
@@ -179,7 +191,7 @@ final class AppModel: ObservableObject {
     func setLanguagePreference(_ preference: AppLanguagePreference) {
         defaults.set(preference.rawValue, forKey: AppLanguagePreference.defaultsKey)
         languagePreference = preference
-        statusMessage = nil
+        notice = nil
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -187,10 +199,13 @@ final class AppModel: ObservableObject {
             try loginManager.setEnabled(enabled)
             launchAtLogin = loginManager.isEnabled
             defaults.set(launchAtLogin, forKey: "launchAtLogin")
-            statusMessage = nil
+            notice = nil
         } catch {
             launchAtLogin = loginManager.isEnabled
-            statusMessage = AppText.loginItemFailure(error.localizedDescription)
+            showNotice(
+                AppText.loginItemFailure(error.localizedDescription),
+                kind: .error
+            )
         }
     }
 
@@ -199,7 +214,7 @@ final class AppModel: ObservableObject {
             try historyStore.clear()
             records = []
         } catch {
-            statusMessage = AppText.clearHistoryFailed
+            showNotice(AppText.clearHistoryFailed, kind: .error)
         }
     }
 
@@ -210,7 +225,7 @@ final class AppModel: ObservableObject {
         case .sessionStarted:
             defaults.set(true, forKey: "codexConnectionVerified")
             connectionStatus = .connected
-            statusMessage = AppText.codexConnectionVerified
+            showNotice(AppText.codexConnectionVerified, kind: .success)
         case .completed:
             pendingInterventions[event.turnKey]?.cancel()
             pendingInterventions[event.turnKey] = nil
@@ -279,7 +294,7 @@ final class AppModel: ObservableObject {
                 do {
                     try await client.send(notification)
                     appendRecord(for: event, outcome: .sent)
-                    statusMessage = AppText.notificationSent
+                    showNotice(AppText.notificationSent, kind: .success)
                     return
                 } catch {
                     lastError = error
@@ -288,7 +303,7 @@ final class AppModel: ObservableObject {
             throw lastError ?? BarkError.invalidResponse
         } catch {
             appendRecord(for: event, outcome: .failed, detail: safeError(error))
-            statusMessage = AppText.pushFailed(safeError(error))
+            showNotice(AppText.pushFailed(safeError(error)), kind: .error)
         }
     }
 
@@ -333,5 +348,14 @@ final class AppModel: ObservableObject {
             return bark.localizedDescription
         }
         return AppText.networkRequestFailed
+    }
+
+    func dismissNotice(id: UUID? = nil) {
+        guard id == nil || notice?.id == id else { return }
+        notice = nil
+    }
+
+    private func showNotice(_ message: String, kind: Notice.Kind) {
+        notice = Notice(message: message, kind: kind)
     }
 }

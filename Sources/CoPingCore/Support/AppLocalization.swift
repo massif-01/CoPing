@@ -192,6 +192,7 @@ public enum AppText {
     }
     public static var settings: String { text("设置…", "Settings…") }
     public static var quitCoPing: String { text("退出 CoPing", "Quit CoPing") }
+    public static var dismiss: String { text("关闭", "Dismiss") }
     public static var menuSubtitle: String {
         text("Codex 推送助手", "Codex push companion")
     }
