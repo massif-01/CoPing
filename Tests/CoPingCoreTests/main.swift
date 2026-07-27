@@ -297,6 +297,23 @@ private func testLanguageResolution() throws {
         AppLanguage.resolve(preferredLanguages: []) == .english,
         "An empty language list did not fall back to English"
     )
+    try check(
+        AppLanguagePreference.system.resolve(preferredLanguages: ["zh-Hant"]) == .simplifiedChinese,
+        "System preference did not map Traditional Chinese to Simplified Chinese"
+    )
+    try check(
+        AppLanguagePreference.system.resolve(preferredLanguages: ["ja-JP"]) == .english,
+        "System preference did not map a non-Chinese language to English"
+    )
+    try check(
+        AppLanguagePreference.simplifiedChinese.resolve(preferredLanguages: ["en-US"])
+            == .simplifiedChinese,
+        "Manual Simplified Chinese did not override the system language"
+    )
+    try check(
+        AppLanguagePreference.english.resolve(preferredLanguages: ["zh-CN"]) == .english,
+        "Manual English did not override the system language"
+    )
 
     try check(
         AppText.terminalInstalled(language: .simplifiedChinese) == "CoPing 已安装监听器。",

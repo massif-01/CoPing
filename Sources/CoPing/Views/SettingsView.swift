@@ -1,3 +1,4 @@
+import AppKit
 import CoPingCore
 import SwiftUI
 
@@ -19,6 +20,7 @@ struct SettingsView: View {
                 .tabItem { Label(AppText.historyTab, systemImage: "clock.arrow.circlepath") }
         }
         .frame(width: 560, height: 420)
+        .background(WindowTitleUpdater(title: AppText.settingsWindowTitle))
         .overlay(alignment: .bottom) {
             if let message = model.statusMessage {
                 Text(message)
@@ -32,11 +34,53 @@ struct SettingsView: View {
     }
 }
 
+private struct WindowTitleUpdater: NSViewRepresentable {
+    let title: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        updateWindowTitle(from: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        updateWindowTitle(from: view)
+    }
+
+    private func updateWindowTitle(from view: NSView) {
+        DispatchQueue.main.async {
+            view.window?.title = title
+        }
+    }
+}
+
 private struct GeneralSettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         Form {
+            Section(AppText.languageSection) {
+                Picker(
+                    AppText.languagePickerLabel,
+                    selection: Binding(
+                        get: { model.languagePreference },
+                        set: { model.setLanguagePreference($0) }
+                    )
+                ) {
+                    Text(AppText.followSystemLanguage)
+                        .tag(AppLanguagePreference.system)
+                    Text(AppText.simplifiedChineseLanguage)
+                        .tag(AppLanguagePreference.simplifiedChinese)
+                    Text(AppText.englishLanguage)
+                        .tag(AppLanguagePreference.english)
+                }
+                .pickerStyle(.segmented)
+
+                Text(AppText.languagePreferenceHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section(AppText.notificationsSection) {
                 Toggle(
                     AppText.enableNotifications,

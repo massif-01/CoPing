@@ -1,11 +1,40 @@
 import Foundation
 
+public enum AppLanguagePreference: String, CaseIterable, Equatable, Sendable {
+    case system
+    case simplifiedChinese
+    case english
+
+    public static let defaultsKey = "appLanguagePreference"
+
+    public static var current: AppLanguagePreference {
+        guard
+            let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
+            let preference = AppLanguagePreference(rawValue: rawValue)
+        else {
+            return .system
+        }
+        return preference
+    }
+
+    public func resolve(preferredLanguages: [String] = Locale.preferredLanguages) -> AppLanguage {
+        switch self {
+        case .system:
+            return AppLanguage.resolve(preferredLanguages: preferredLanguages)
+        case .simplifiedChinese:
+            return .simplifiedChinese
+        case .english:
+            return .english
+        }
+    }
+}
+
 public enum AppLanguage: Equatable, Sendable {
     case simplifiedChinese
     case english
 
     public static var current: AppLanguage {
-        resolve(preferredLanguages: Locale.preferredLanguages)
+        AppLanguagePreference.current.resolve()
     }
 
     public static func resolve(preferredLanguages: [String]) -> AppLanguage {
@@ -168,6 +197,21 @@ public enum AppText {
 
     public static var generalTab: String { text("通用", "General") }
     public static var historyTab: String { text("记录", "History") }
+    public static var languageSection: String { text("语言", "Language") }
+    public static var languagePickerLabel: String {
+        text("显示语言", "Display language")
+    }
+    public static var followSystemLanguage: String {
+        text("跟随系统", "Follow System")
+    }
+    public static var simplifiedChineseLanguage: String { "简体中文" }
+    public static var englishLanguage: String { "English" }
+    public static var languagePreferenceHelp: String {
+        text(
+            "默认跟随系统；所有中文系统均使用简体中文。",
+            "The default follows the system. All Chinese system languages use Simplified Chinese."
+        )
+    }
     public static var notificationsSection: String { text("通知", "Notifications") }
     public static var enableNotifications: String {
         text("启用 CoPing 通知", "Enable CoPing notifications")

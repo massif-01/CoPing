@@ -24,6 +24,7 @@ final class AppModel: ObservableObject {
     @Published var deviceKey: String
     @Published var notificationsEnabled: Bool
     @Published var launchAtLogin: Bool
+    @Published var languagePreference: AppLanguagePreference
     @Published var connectionStatus: ConnectionStatus
     @Published var statusMessage: String?
     @Published var records: [DeliveryRecord]
@@ -48,6 +49,7 @@ final class AppModel: ObservableObject {
         deviceKey = (try? keychain.read()) ?? ""
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
         launchAtLogin = defaults.object(forKey: "launchAtLogin") as? Bool ?? true
+        languagePreference = AppLanguagePreference.current
         records = historyStore.load()
 
         if hookManager.isInstalled() {
@@ -172,6 +174,12 @@ final class AppModel: ObservableObject {
     func setNotificationsEnabled(_ enabled: Bool) {
         notificationsEnabled = enabled
         defaults.set(enabled, forKey: "notificationsEnabled")
+    }
+
+    func setLanguagePreference(_ preference: AppLanguagePreference) {
+        defaults.set(preference.rawValue, forKey: AppLanguagePreference.defaultsKey)
+        languagePreference = preference
+        statusMessage = nil
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
