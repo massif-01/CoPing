@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MenuContentView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -61,7 +62,10 @@ struct MenuContentView: View {
                 }
                 .copingSecondaryButtonStyle()
 
-                SettingsLink {
+                Button {
+                    openSettings()
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                } label: {
                     Label(AppText.settings, systemImage: "gearshape")
                         .frame(maxWidth: .infinity)
                 }
