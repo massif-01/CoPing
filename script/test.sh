@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export SDKROOT="/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk"
+export SDKROOT="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
 export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/clang-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$ROOT_DIR/.build/swiftpm-cache"
 

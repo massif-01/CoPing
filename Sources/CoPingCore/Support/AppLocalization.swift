@@ -192,11 +192,22 @@ public enum AppText {
     }
     public static var settings: String { text("设置…", "Settings…") }
     public static var quitCoPing: String { text("退出 CoPing", "Quit CoPing") }
+    public static var menuSubtitle: String {
+        text("Codex 推送助手", "Codex push companion")
+    }
+    public static var connectionSection: String { text("连接", "Connection") }
 
     // MARK: - Settings
 
     public static var generalTab: String { text("通用", "General") }
     public static var historyTab: String { text("记录", "History") }
+    public static var settingsSidebarAccessibilityLabel: String {
+        text("设置分类", "Settings sections")
+    }
+    public static var appVersionLabel: String { text("版本", "Version") }
+    public static var currentVersionLabel: String {
+        text("当前版本", "Current version")
+    }
     public static var languageSection: String { text("语言", "Language") }
     public static var languagePickerLabel: String {
         text("显示语言", "Display language")
@@ -241,8 +252,11 @@ public enum AppText {
     public static var executionFailureLabel: String {
         text("执行失败", "Execution failures")
     }
-    public static var notSupportedInV1: String {
-        text("v1 暂不支持", "Not supported in v1")
+    public static func notSupportedInVersion(_ version: String) -> String {
+        text(
+            "\(version) 暂不支持",
+            "Not supported in \(version)"
+        )
     }
     public static var serviceSection: String { text("服务", "Service") }
     public static var httpsServerAddress: String {

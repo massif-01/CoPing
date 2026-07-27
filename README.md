@@ -4,7 +4,7 @@ CoPing is a native macOS 14+ menu bar app that forwards important Codex desktop 
 
 CoPing 是一个原生 macOS 14+ 菜单栏工具，通过 Bark 将 Codex 桌面端的重要事件推送到 iPhone。
 
-## v1 capabilities / 第一版能力
+## 0.1.0 capabilities / 0.1.0 版本能力
 
 - Task completed / 任务完成
 - Permission requested / 权限请求

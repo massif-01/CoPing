@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = NSHostingController(rootView: SettingsView(model: model))
         let window = NSWindow(contentViewController: controller)
         window.title = AppText.settingsWindowTitle
-        window.setContentSize(NSSize(width: 560, height: 420))
+        window.setContentSize(NSSize(width: 820, height: 560))
         window.center()
         window.makeKeyAndOrderFront(nil)
         qaModel = model
@@ -34,7 +34,7 @@ struct CoPingApp: App {
             Image(nsImage: Self.menuBarImage)
                 .accessibilityLabel("CoPing")
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView(model: model)
