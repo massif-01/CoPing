@@ -2,7 +2,7 @@ import Foundation
 
 public enum CoPingBrand {
     public static let barkIconURL = URL(
-        string: "https://raw.githubusercontent.com/massif-01/CoPing/main/assets/icon/CoPing-orange-transparent.png"
+        string: "https://raw.githubusercontent.com/massif-01/CoPing/main/assets/icon/CoPing-app-icon.png"
     )!
 }
 
