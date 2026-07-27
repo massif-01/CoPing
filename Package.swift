@@ -12,10 +12,15 @@ let package = Package(
         .executable(name: "CoPingSelfTests", targets: ["CoPingSelfTests"]),
     ],
     targets: [
-        .target(name: "CoPingCore"),
+        .target(
+            name: "CoPingCore",
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
+        .target(name: "CoPingAppSupport"),
         .executableTarget(
             name: "CoPing",
-            dependencies: ["CoPingCore"]
+            dependencies: ["CoPingCore", "CoPingAppSupport"],
+            exclude: ["Resources"]
         ),
         .executableTarget(
             name: "CoPingHook",
@@ -23,7 +28,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "CoPingSelfTests",
-            dependencies: ["CoPingCore"],
+            dependencies: ["CoPingCore", "CoPingAppSupport"],
             path: "Tests/CoPingCoreTests"
         ),
     ],

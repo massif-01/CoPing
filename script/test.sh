@@ -6,5 +6,6 @@ export SDKROOT="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
 export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/clang-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$ROOT_DIR/.build/swiftpm-cache"
 
+bash "$ROOT_DIR/script/test_release_version.sh"
 swift build --disable-sandbox --package-path "$ROOT_DIR" -Xswiftc -warnings-as-errors
 swift run --disable-sandbox --package-path "$ROOT_DIR" CoPingSelfTests

@@ -67,15 +67,8 @@ struct MenuContentView: View {
         .frame(width: 310)
     }
 
-    @ViewBuilder
     private var menuActions: some View {
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing: 10) {
-                actionButtons
-            }
-        } else {
-            actionButtons
-        }
+        actionButtons
     }
 
     private var actionButtons: some View {
@@ -96,16 +89,32 @@ struct MenuContentView: View {
             .copingSecondaryButtonStyle()
 
             Button {
-                openSettings()
-                NSApplication.shared.activate(ignoringOtherApps: true)
+                openSettingsInFront()
             } label: {
                 Label(AppText.settings, systemImage: "gearshape")
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
             }
-            .copingSecondaryButtonStyle()
+            .copingPrimaryButtonStyle()
             .keyboardShortcut(",", modifiers: .command)
         }
         .controlSize(.regular)
+    }
+
+    private func openSettingsInFront() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openSettings()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            NSApplication.shared.windows
+                .first {
+                    $0.isVisible
+                        && $0.styleMask.contains(.titled)
+                        && !($0 is NSPanel)
+                }?
+                .makeKeyAndOrderFront(nil)
+        }
     }
 
     private var statusIcon: String {

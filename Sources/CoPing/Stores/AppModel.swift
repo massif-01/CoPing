@@ -1,20 +1,11 @@
 import CoPingCore
+import CoPingAppSupport
 import Combine
 import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
-    struct Notice: Equatable, Identifiable {
-        enum Kind {
-            case success
-            case information
-            case error
-        }
-
-        let id = UUID()
-        let message: String
-        let kind: Kind
-    }
+    typealias Notice = NoticePresenter.Notice
 
     enum ConnectionStatus {
         case disconnected
@@ -35,6 +26,7 @@ final class AppModel: ObservableObject {
     @Published var baseURLString: String
     @Published var deviceKey: String
     @Published var notificationsEnabled: Bool
+    @Published var ignorePermissionNotifications: Bool
     @Published var launchAtLogin: Bool
     @Published var languagePreference: AppLanguagePreference
     @Published var connectionStatus: ConnectionStatus
@@ -43,23 +35,42 @@ final class AppModel: ObservableObject {
     @Published var isBusy = false
 
     private let defaults = UserDefaults.standard
-    private let keychain = KeychainStore()
+    private let deviceKeyStore = DeviceKeyStore()
     private let historyStore = DeliveryHistoryStore()
     private let helperInstaller = HelperInstaller()
     private let hookManager = HookConfigurationManager()
     private let loginManager = LoginItemManager()
-    private var pendingInterventions: [String: Task<Void, Never>] = [:]
+    private let taskTitleResolver = CodexTaskTitleResolver()
+    private struct PendingIntervention {
+        let eventType: CodexEvent.EventType
+        let task: Task<Void, Never>
+    }
+
+    private var pendingInterventions: [String: PendingIntervention] = [:]
     private var seenEventKeys: [String] = []
     private var seenEventSet: Set<String> = []
+
+    private lazy var noticePresenter = NoticePresenter { [weak self] notice in
+        self?.notice = notice
+    }
 
     private lazy var socketServer = UnixSocketServer { [weak self] event in
         Task { @MainActor in self?.receive(event) }
     }
 
     init(startServices: Bool = true) {
+        let deviceKeyReadFailed: Bool
         baseURLString = defaults.string(forKey: "barkBaseURL") ?? "https://api.day.app"
-        deviceKey = (try? keychain.read()) ?? ""
+        do {
+            deviceKey = try deviceKeyStore.read() ?? ""
+            deviceKeyReadFailed = false
+        } catch {
+            deviceKey = ""
+            deviceKeyReadFailed = true
+        }
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
+        ignorePermissionNotifications =
+            defaults.object(forKey: "ignorePermissionNotifications") as? Bool ?? false
         launchAtLogin = defaults.object(forKey: "launchAtLogin") as? Bool ?? true
         languagePreference = AppLanguagePreference.current
         records = historyStore.load()
@@ -87,6 +98,10 @@ final class AppModel: ObservableObject {
                 launchAtLogin = loginManager.isEnabled
             }
         }
+
+        if deviceKeyReadFailed {
+            showNotice(AppText.barkConfigurationReadFailed, kind: .error)
+        }
     }
 
     var codexDetected: Bool { CodexDetector.isInstalled }
@@ -108,7 +123,7 @@ final class AppModel: ObservableObject {
                 baseURLString: baseURLString,
                 deviceKeyInput: deviceKey
             )
-            try keychain.save(configuration.deviceKey)
+            try deviceKeyStore.save(configuration.deviceKey)
             deviceKey = configuration.deviceKey
             baseURLString = configuration.baseURL.absoluteString
             defaults.set(baseURLString, forKey: "barkBaseURL")
@@ -188,10 +203,22 @@ final class AppModel: ObservableObject {
         defaults.set(enabled, forKey: "notificationsEnabled")
     }
 
+    func setIgnorePermissionNotifications(_ ignored: Bool) {
+        ignorePermissionNotifications = ignored
+        defaults.set(ignored, forKey: "ignorePermissionNotifications")
+
+        guard ignored else { return }
+        let pendingPermissionKeys = pendingInterventions.compactMap { key, pending in
+            pending.eventType == .permissionRequested ? key : nil
+        }
+        for key in pendingPermissionKeys {
+            pendingInterventions.removeValue(forKey: key)?.task.cancel()
+        }
+    }
+
     func setLanguagePreference(_ preference: AppLanguagePreference) {
         defaults.set(preference.rawValue, forKey: AppLanguagePreference.defaultsKey)
         languagePreference = preference
-        notice = nil
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -199,7 +226,6 @@ final class AppModel: ObservableObject {
             try loginManager.setEnabled(enabled)
             launchAtLogin = loginManager.isEnabled
             defaults.set(launchAtLogin, forKey: "launchAtLogin")
-            notice = nil
         } catch {
             launchAtLogin = loginManager.isEnabled
             showNotice(
@@ -227,25 +253,31 @@ final class AppModel: ObservableObject {
             connectionStatus = .connected
             showNotice(AppText.codexConnectionVerified, kind: .success)
         case .completed:
-            pendingInterventions[event.turnKey]?.cancel()
-            pendingInterventions[event.turnKey] = nil
+            pendingInterventions.removeValue(forKey: event.turnKey)?.task.cancel()
+            let taskTitle = taskTitleResolver.title(for: event.sessionID)
             Task {
                 await deliver(
                     PushNotification(
                         title: AppText.completedNotificationTitle,
-                        body: AppText.completedNotificationBody(project: event.projectName)
+                        body: AppText.completedNotificationBody(taskTitle: taskTitle)
                     ),
                     for: event
                 )
             }
-        case .permissionRequested, .questionRequested:
+        case .permissionRequested:
+            let preferences = CodexNotificationPreferences(
+                ignorePermissionNotifications: ignorePermissionNotifications
+            )
+            guard preferences.allows(event.type) else { return }
+            scheduleIntervention(event)
+        case .questionRequested:
             scheduleIntervention(event)
         }
     }
 
     private func scheduleIntervention(_ event: CodexEvent) {
         guard pendingInterventions[event.turnKey] == nil else { return }
-        pendingInterventions[event.turnKey] = Task { [weak self] in
+        let task = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(5))
             } catch {
@@ -254,13 +286,14 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             let title: String
             let body: String
+            let taskTitle = self.taskTitleResolver.title(for: event.sessionID)
             switch event.type {
             case .permissionRequested:
                 title = AppText.permissionNotificationTitle
-                body = AppText.permissionNotificationBody(project: event.projectName)
+                body = AppText.permissionNotificationBody(taskTitle: taskTitle)
             case .questionRequested:
                 title = AppText.questionNotificationTitle
-                body = AppText.questionNotificationBody(project: event.projectName)
+                body = AppText.questionNotificationBody(taskTitle: taskTitle)
             default:
                 return
             }
@@ -270,6 +303,10 @@ final class AppModel: ObservableObject {
             )
             self.pendingInterventions[event.turnKey] = nil
         }
+        pendingInterventions[event.turnKey] = PendingIntervention(
+            eventType: event.type,
+            task: task
+        )
     }
 
     private func deliver(_ notification: PushNotification, for event: CodexEvent) async {
@@ -351,11 +388,10 @@ final class AppModel: ObservableObject {
     }
 
     func dismissNotice(id: UUID? = nil) {
-        guard id == nil || notice?.id == id else { return }
-        notice = nil
+        noticePresenter.dismiss(id: id)
     }
 
     private func showNotice(_ message: String, kind: Notice.Kind) {
-        notice = Notice(message: message, kind: kind)
+        noticePresenter.show(message, kind: kind)
     }
 }

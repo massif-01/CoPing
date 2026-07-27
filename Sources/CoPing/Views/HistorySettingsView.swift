@@ -6,11 +6,13 @@ struct HistorySettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        SettingsPage(
+            AppText.historyTab,
+            subtitle: AppText.historySettingsDescription,
+            systemImage: "clock.arrow.circlepath",
+            tint: .teal
+        ) {
             HStack {
-                Text(AppText.historyTab)
-                    .font(.title2.weight(.semibold))
-
                 Spacer()
 
                 Button(AppText.clearHistory, role: .destructive) {
@@ -19,31 +21,37 @@ struct HistorySettingsView: View {
                 .copingSecondaryButtonStyle()
                 .disabled(model.records.isEmpty)
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 24)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 4)
 
             if model.records.isEmpty {
-                ContentUnavailableView(
-                    AppText.noNotificationHistory,
-                    systemImage: "bell.slash",
-                    description: Text(AppText.historyPrivacyHelp)
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(model.records) { record in
-                    historyRow(record)
-                        .listRowBackground(Color.clear)
+                SettingsCard {
+                    ContentUnavailableView(
+                        AppText.noNotificationHistory,
+                        systemImage: "bell.slash",
+                        description: Text(AppText.historyPrivacyHelp)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 34)
                 }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
+            } else {
+                SettingsCard {
+                    ForEach(Array(model.records.enumerated()), id: \.element.id) {
+                        index,
+                        record in
+                        historyRow(record)
+
+                        if index < model.records.count - 1 {
+                            SettingsCardDivider()
+                        }
+                    }
+                }
             }
 
             Text(AppText.historyLimit)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 28)
-                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
         }
     }
 
@@ -70,7 +78,8 @@ struct HistorySettingsView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 7)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
     }
 
     private func eventName(_ type: CodexEvent.EventType) -> String {

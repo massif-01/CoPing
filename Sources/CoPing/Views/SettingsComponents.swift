@@ -4,24 +4,180 @@ import SwiftUI
 
 struct SettingsPage<Content: View>: View {
     let title: String
+    let subtitle: String
+    let systemImage: String
+    let imageResourceName: String?
+    let tint: Color
     private let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(
+        _ title: String,
+        subtitle: String,
+        systemImage: String,
+        imageResourceName: String? = nil,
+        tint: Color,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.imageResourceName = imageResourceName
+        self.tint = tint
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .padding(.horizontal, 28)
-                .padding(.top, 24)
-                .padding(.bottom, 12)
+        ScrollView {
+            VStack(spacing: 14) {
+                SettingsHero(
+                    title: title,
+                    subtitle: subtitle,
+                    systemImage: systemImage,
+                    imageResourceName: imageResourceName,
+                    tint: tint
+                )
 
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                content
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 20)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
         }
+    }
+}
+
+struct SettingsHero: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let imageResourceName: String?
+    let tint: Color
+
+    var body: some View {
+        VStack(spacing: 7) {
+            if let resourceImage {
+                Image(nsImage: resourceImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 54, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 30, weight: .medium))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(tint)
+                    .frame(width: 54, height: 54)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+            }
+
+            Text(title)
+                .font(.title2.weight(.bold))
+
+            Text(subtitle)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .background(SettingsCardBackground())
+    }
+
+    private var resourceImage: NSImage? {
+        guard
+            let imageResourceName,
+            let imageURL = Bundle.main.url(
+                forResource: imageResourceName,
+                withExtension: "png"
+            )
+        else {
+            return nil
+        }
+
+        return NSImage(contentsOf: imageURL)
+    }
+}
+
+struct SettingsCard<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+        }
+        .background(SettingsCardBackground())
+    }
+}
+
+struct SettingsCardBackground: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.primary.opacity(0.035))
+    }
+}
+
+struct SettingsRow<Control: View>: View {
+    let systemImage: String
+    let tint: Color
+    let title: String
+    let subtitle: String?
+    private let control: Control
+
+    init(
+        systemImage: String,
+        tint: Color,
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder control: () -> Control
+    ) {
+        self.systemImage = systemImage
+        self.tint = tint
+        self.title = title
+        self.subtitle = subtitle
+        self.control = control()
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 16)
+
+            control
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+}
+
+struct SettingsCardDivider: View {
+    var body: some View {
+        Divider()
+            .padding(.leading, 52)
     }
 }
 
@@ -93,22 +249,10 @@ private struct NoticeSurfaceModifier: ViewModifier {
 
 extension View {
     @ViewBuilder
-    func copingSettingsToolbar() -> some View {
-        if #available(macOS 15.0, *) {
-            toolbar(removing: .sidebarToggle)
-                .toolbar(removing: .title)
-        } else {
-            toolbar(removing: .sidebarToggle)
-        }
-    }
-
-    @ViewBuilder
     func copingPrimaryButtonStyle() -> some View {
-        if #available(macOS 26.0, *) {
-            buttonStyle(.glassProminent)
-        } else {
-            buttonStyle(.borderedProminent)
-        }
+        buttonStyle(.borderedProminent)
+            .tint(Color(nsColor: .systemBlue))
+            .foregroundStyle(.white)
     }
 
     @ViewBuilder

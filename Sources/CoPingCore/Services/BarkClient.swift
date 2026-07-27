@@ -2,7 +2,9 @@ import Foundation
 
 public enum BarkError: LocalizedError, Equatable {
     case invalidBaseURL
+    case invalidPublicBaseURL
     case invalidDeviceKey
+    case deviceKeyNotRegistered
     case invalidResponse
     case rejected(Int)
     case serverRejected(Int)
@@ -11,8 +13,12 @@ public enum BarkError: LocalizedError, Equatable {
         switch self {
         case .invalidBaseURL:
             return AppText.invalidBarkBaseURL
+        case .invalidPublicBaseURL:
+            return AppText.invalidPublicBarkBaseURL
         case .invalidDeviceKey:
             return AppText.invalidBarkDeviceKey
+        case .deviceKeyNotRegistered:
+            return AppText.barkDeviceKeyNotRegistered
         case .invalidResponse:
             return AppText.invalidBarkResponse
         case .rejected(let status):
@@ -77,6 +83,9 @@ public struct BarkClient: PushProvider {
         else {
             throw BarkError.invalidBaseURL
         }
+        if baseURL.host?.lowercased() == "api.day.app", !["", "/"].contains(baseURL.path) {
+            throw BarkError.invalidPublicBaseURL
+        }
         self.baseURL = baseURL
         self.deviceKey = deviceKey
         if let session {
@@ -110,6 +119,12 @@ public struct BarkClient: PushProvider {
             throw BarkError.invalidResponse
         }
         guard (200..<300).contains(http.statusCode) else {
+            if
+                let result = try? JSONDecoder().decode(BarkResponse.self, from: data),
+                result.message?.lowercased().contains("device token") == true
+            {
+                throw BarkError.deviceKeyNotRegistered
+            }
             throw BarkError.rejected(http.statusCode)
         }
         if
@@ -143,4 +158,5 @@ private struct BarkPayload: Encodable {
 
 private struct BarkResponse: Decodable {
     let code: Int?
+    let message: String?
 }

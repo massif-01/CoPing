@@ -1,66 +1,144 @@
-# CoPing
+<div align="center">
+  <img src="assets/icon/CoPing-app-icon.png" width="160" alt="CoPing 图标">
 
-CoPing is a native macOS 14+ menu bar app that forwards important Codex desktop events to an iPhone through Bark.
+  <h1>CoPing</h1>
 
-CoPing 是一个原生 macOS 14+ 菜单栏工具，通过 Bark 将 Codex 桌面端的重要事件推送到 iPhone。
+  <p><strong>Codex 做完了，手机会告诉你。</strong></p>
 
-## 0.1.0 capabilities / 0.1.0 版本能力
+  <p>
+    <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black">
+    <img alt="Swift" src="https://img.shields.io/badge/Swift-orange">
+    <img alt="Apache 2.0" src="https://img.shields.io/badge/License-Apache--2.0-blue">
+  </p>
 
-- Task completed / 任务完成
-- Permission requested / 权限请求
-- User question requested / 普通问题
-- Five-second intervention debounce / 介入通知延迟 5 秒确认
-- Bark public or self-hosted HTTPS servers / Bark 公共或自建 HTTPS 服务
-- CoPing-branded Bark notification icon / 带 CoPing 品牌图标的 Bark 通知
-- Automatic English or Simplified Chinese UI with a persistent manual override; all Chinese system variants use Simplified Chinese / 根据系统语言自动使用英文或简体中文，也可持久化手动切换；所有中文系统变体统一映射为简体中文
-- Device Key stored in macOS Keychain / Device Key 保存于 macOS 钥匙串
-- Launch at login / 登录时自动启动
+  <p>中文 · <a href="README.en.md">English</a></p>
+</div>
 
-Task failure detection, ntfy, remote approval, and remote replies are intentionally out of scope.
+macOS 菜单栏小工具。Codex 跑完，或者卡在那儿等你拍板时，就把通知推到手机上。
 
-执行失败识别、ntfy、远程审批和远程回答不在第一版范围内。
+## 为什么做这个
 
-## Build and run / 构建与运行
+把任务扔给 Codex，人去忙别的——听起来挺美，实际上过一会儿还是要回来瞅一眼，不然不放心。不知道跑完没，不知道是不是在等我按权限。
+
+这个循环很烦。CoPing 就是为了把它断掉。
+
+## v0.1.1 能做什么
+
+| 事件 | 处理方式 |
+| --- | --- |
+| 任务完成 | 立即推送 |
+| 权限请求 | 等 5 秒，还没完就推 |
+| 普通问题 | 等 5 秒，还没完就推 |
+
+等 5 秒是给 Codex 留点儿反应时间——它有时候自己就把问题解掉了，没必要专程叫你回来。
+
+其他：Bark 官方或自建 HTTPS 服务；单独屏蔽权限请求；查最近 100 条推送记录；手动检查并下载 GitHub Release 更新；开机自启；跟系统语言走，也能手动切简中/英文。
+
+手机上批准操作、回答 Codex、远程控制——这版都没做。执行失败的通知也还没加。
+
+<p align="center">
+  <img src="assets/readme/push-notification.jpg" width="320" alt="CoPing 在 iPhone 锁屏上的任务完成通知">
+</p>
+
+## 原理
+
+```mermaid
+flowchart LR
+    A["Codex Hooks"] --> B["CoPingHook"]
+    B --> C["清理事件内容"]
+    C --> D["本机 Unix Socket"]
+    D --> E["CoPing 菜单栏 App"]
+    E --> F["Bark HTTPS API"]
+    F --> G["iPhone"]
+```
+
+Codex 触发 Hook 时，随之调起的轻量 Helper 会先把提示词、回复、命令、完整路径这些东西刮掉，只留事件类型、会话 ID、项目名，走本机 Unix Socket 送进 CoPing。
+
+通知上的标题要是人话，不能就显示一串 ID，所以 CoPing 拿会话 ID 在本机 Codex 数据库里查了一下。任务状态本身不靠查库，以 Hooks 事件为准。
+
+通知从 Mac 直发到你的 Bark 服务，没有中间商。
+
+## 上手
+
+**需要：** macOS 14+、Codex 桌面端、iPhone 上装好 [Bark](https://github.com/Finb/Bark)。
+
+### 安装
+
+从 [GitHub Releases](https://github.com/massif-01/CoPing/releases) 下载最新的 `CoPing-macOS-arm64.dmg`，打开后把 `CoPing.app` 拖进“应用程序”文件夹。
+
+### macOS 说打不开
+
+我还没加入 Apple Developer Program，所以这个版本没有公证，macOS 可能会拦下来说"无法验证开发者"或者"已损坏"。
+
+先确认包是从本仓库 Releases 下的，然后终端跑一下：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CoPing.app
+open /Applications/CoPing.app
+```
+
+这只是摘掉 macOS 给下载文件贴的隔离标签，不影响系统安全设置。来源不明的 App 别这么干。
+
+### 配置 Bark
+
+打开 Bark，复制 Device Key，填进 CoPing 设置里。服务地址默认是 `https://api.day.app`，自建的话换成自己的。点"保存并发送测试通知"，手机收到了就好了。
+
+在 Bark 首页的示例 URL 卡片上，点图中圈出的复制按钮，就能复制 Device Key：
+
+<p align="center">
+  <img src="assets/readme/copy-bark-device-key.png" width="640" alt="在 Bark 首页复制 Device Key 的按钮位置">
+</p>
+
+### 接入 Codex
+
+进"设置 → Codex"，点"连接 Codex"，弹出的终端里输 `/hooks`，看一眼 `CoPingHook` 的路径，信任，关掉终端。然后在 Codex 里新建一个任务，等状态变"已连接"就行了。
+
+连接时 CoPing 把配置合并进 `~/.codex/hooks.json`，你已有的 Hooks 不动，同时留一份带时间戳的备份。断开时只删自己写进去的那几条。
+
+## 隐私
+
+没有账号，没有服务器。
+
+进 App 之前事件就已经过滤过了——提示词、回复、命令、完整路径都不会进来。通知里可能有任务标题和项目名，方便认出是哪个任务。本地记录只存事件类型、项目名、时间和推送结果，不存对话内容。
+
+Device Key 存在 `~/Library/Application Support/CoPing/config.json`，权限 `0600`，不会出现在请求 URL 或日志里。同一用户下的其他进程能读到这个文件——如果介意，自建 Bark 就行。
+
+## Roadmap
+
+### v0.1.1 — Bark 通知与手动更新 ✓
+
+- [x] 任务完成 / 权限请求 / 普通问题通知
+- [x] Bark 官方服务与自建服务
+- [x] 本地推送记录
+- [x] 手动检查并下载 GitHub Release 更新
+- [x] 开机自启
+- [x] 简中 / 英文
+
+### v0.2.0 — ntfy
+
+- [ ] ntfy.sh 与自建 ntfy 服务
+- [ ] Topic 与访问 Token
+- [ ] 通知优先级
+- [ ] Bark 与 ntfy 二选一
+
+这版不打算同时往多个通道推。
+
+### 以后
+
+- [ ] 执行失败通知（更可靠的版本）
+- [ ] 从手机回答或批准 Codex 请求
+
+## 从源码构建
 
 ```bash
 ./script/test.sh
 ./script/build_and_run.sh --verify
 ```
 
-The Run action in Codex is wired to `./script/build_and_run.sh`.
+Swift + SwiftUI，不依赖 Electron、Python 或 Node.js。
 
-当前开发机只有 Command Line Tools，因此开发脚本固定使用匹配的 macOS 15.4 SDK。正式分发应安装完整 Xcode。
+发布包必须从 `v主版本.次版本.修订版本`（例如 `v0.1.1`）Tag 对应的提交构建。打包脚本会自动把 Tag 写入 App Bundle，菜单和版本页不需要手动修改版本号。
 
-## First connection / 首次连接
+## 协议
 
-1. Open CoPing settings from the menu bar.
-2. Configure an HTTPS Bark server and Device Key, then send a test notification.
-3. Choose **Connect Codex**.
-4. In the terminal opened by CoPing, enter `/hooks`, review the `CoPingHook` path, and trust all CoPing hooks.
-5. Exit the terminal and create a new Codex desktop task. CoPing changes to **Connected** after `SessionStart`.
-
-CoPing merges its handlers into `~/.codex/hooks.json`, preserves existing handlers, creates a timestamped backup, and removes only its own exact command when disconnected.
-
-## Privacy / 隐私
-
-The helper discards prompts, assistant responses, commands, full paths, and tool arguments before sending an event to the app. Local history contains only event type, project basename, timestamp, and delivery result. The Bark Device Key never appears in the request URL or logs.
-
-Helper 会在事件进入 App 前丢弃提示词、回复、命令、完整路径和工具参数。本地记录只包含事件类型、项目名、时间和发送结果。Bark Device Key 不进入 URL 或日志。
-
-## Distribution / 分发
-
-Local development builds use ad-hoc signing with Hardened Runtime:
-
-```bash
-./script/build_and_run.sh --build-only
-```
-
-For Developer ID signing and notarization:
-
-```bash
-COPING_SIGN_IDENTITY="Developer ID Application: Example (TEAMID)" \
-COPING_NOTARY_PROFILE="coping-notary" \
-./script/package_release.sh
-```
-
-The release script requires a complete Xcode installation, a Developer ID Application certificate, and a preconfigured `notarytool` keychain profile.
+[Apache License 2.0](LICENSE)

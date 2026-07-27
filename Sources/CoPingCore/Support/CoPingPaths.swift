@@ -26,6 +26,13 @@ public enum CoPingPaths {
             .appendingPathComponent("history.json", isDirectory: false)
     }
 
+    public static func configurationFile(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        applicationSupport(homeDirectory: homeDirectory)
+            .appendingPathComponent("config.json", isDirectory: false)
+    }
+
     public static func socketPath(userID: uid_t = getuid()) -> String {
         "/tmp/coping-\(userID).sock"
     }

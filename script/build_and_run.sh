@@ -29,6 +29,8 @@ cp "$BIN_DIR/CoPingHook" "$APP_HELPERS/CoPingHook"
 cp "$ROOT_DIR/Packaging/Info.plist" "$APP_CONTENTS/Info.plist"
 cp "$ROOT_DIR/Packaging/CoPing.icns" "$APP_RESOURCES/CoPing.icns"
 cp "$ROOT_DIR/CoPing.icon/Assets/CoPing-orbit-mark.svg" "$APP_RESOURCES/CoPing-orbit-mark.svg"
+cp "$ROOT_DIR/Sources/CoPing/Resources/BarkIcon.png" "$APP_RESOURCES/BarkIcon.png"
+cp "$ROOT_DIR/Sources/CoPing/Resources/GitHubMark.svg" "$APP_RESOURCES/GitHubMark.svg"
 chmod +x "$APP_MACOS/CoPing" "$APP_HELPERS/CoPingHook"
 
 /usr/bin/codesign --force --sign - --options runtime "$APP_HELPERS/CoPingHook"
@@ -60,8 +62,11 @@ case "$MODE" in
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null
     ;;
+  --settings|settings)
+    /usr/bin/open -n "$APP_BUNDLE" --args --show-settings
+    ;;
   *)
-    echo "usage: $0 [run|--build-only|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--build-only|--debug|--logs|--telemetry|--verify|--settings]" >&2
     exit 2
     ;;
 esac

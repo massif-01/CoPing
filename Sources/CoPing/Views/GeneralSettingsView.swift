@@ -5,11 +5,21 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        SettingsPage(AppText.generalTab) {
-            Form {
-                Section(AppText.languageSection) {
+        SettingsPage(
+            AppText.generalTab,
+            subtitle: AppText.generalSettingsDescription,
+            systemImage: "gearshape.fill",
+            tint: .secondary
+        ) {
+            SettingsCard {
+                SettingsRow(
+                    systemImage: "globe",
+                    tint: .blue,
+                    title: AppText.languagePickerLabel,
+                    subtitle: AppText.languagePreferenceHelp
+                ) {
                     Picker(
-                        AppText.languagePickerLabel,
+                        "",
                         selection: Binding(
                             get: { model.languagePreference },
                             set: { model.setLanguagePreference($0) }
@@ -23,53 +33,52 @@ struct GeneralSettingsView: View {
                             .tag(AppLanguagePreference.english)
                     }
                     .pickerStyle(.segmented)
-
-                    Text(AppText.languagePreferenceHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .labelsHidden()
+                    .frame(width: 245)
                 }
 
-                Section(AppText.notificationsSection) {
+                SettingsCardDivider()
+
+                SettingsRow(
+                    systemImage: "bell.fill",
+                    tint: .red,
+                    title: AppText.enableNotifications,
+                    subtitle: AppText.notificationsDisabledHelp
+                ) {
                     Toggle(
-                        AppText.enableNotifications,
+                        "",
                         isOn: Binding(
                             get: { model.notificationsEnabled },
                             set: { model.setNotificationsEnabled($0) }
                         )
                     )
-
-                    Text(AppText.notificationsDisabledHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .accessibilityLabel(AppText.enableNotifications)
                 }
 
-                Section(AppText.startupSection) {
+                SettingsCardDivider()
+
+                SettingsRow(
+                    systemImage: "power",
+                    tint: .green,
+                    title: AppText.launchAtLogin
+                ) {
                     Toggle(
-                        AppText.launchAtLogin,
+                        "",
                         isOn: Binding(
                             get: { model.launchAtLogin },
                             set: { model.setLaunchAtLogin($0) }
                         )
                     )
-                }
-
-                Section(AppText.appVersionLabel) {
-                    LabeledContent(
-                        AppText.currentVersionLabel,
-                        value: AppVersion.current
-                    )
-                    LabeledContent(
-                        AppText.supportedEventsLabel,
-                        value: AppText.supportedEventsValue
-                    )
-                    LabeledContent(
-                        AppText.executionFailureLabel,
-                        value: AppText.notSupportedInVersion(AppVersion.current)
-                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .accessibilityLabel(AppText.launchAtLogin)
                 }
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+
         }
     }
 }

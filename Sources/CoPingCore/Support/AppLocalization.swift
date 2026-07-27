@@ -59,10 +59,6 @@ public enum AppText {
 
     // MARK: - Shared errors
 
-    public static func keychainOperationFailed(_ status: Int32) -> String {
-        text("钥匙串操作失败（\(status)）。", "Keychain operation failed (\(status)).")
-    }
-
     public static var malformedHooksJSON: String {
         text(
             "现有 hooks.json 不是有效 JSON，CoPing 没有修改它。",
@@ -88,10 +84,24 @@ public enum AppText {
         )
     }
 
+    public static var invalidPublicBarkBaseURL: String {
+        text(
+            "公共 Bark 服务地址只能填写 https://api.day.app；完整推送地址请粘贴到 Device Key 一栏。",
+            "The public Bark server address must be https://api.day.app. Paste the full push URL into the Device Key field."
+        )
+    }
+
     public static var invalidBarkDeviceKey: String {
         text(
             "请输入 Device Key，或粘贴 Bark 提供的完整推送地址。",
             "Enter a Device Key or paste the full push URL provided by Bark."
+        )
+    }
+
+    public static var barkConfigurationReadFailed: String {
+        text(
+            "无法读取本地 Bark 配置，原文件未被修改。请检查配置文件后重试。",
+            "Unable to read the local Bark configuration. The original file was not modified. Check the configuration file and try again."
         )
     }
 
@@ -105,6 +115,13 @@ public enum AppText {
 
     public static func barkServerRejected(_ code: Int) -> String {
         text("Bark 服务拒绝了请求（代码 \(code)）。", "Bark rejected the request (code \(code)).")
+    }
+
+    public static var barkDeviceKeyNotRegistered: String {
+        text(
+            "当前 Device Key 未在这个 Bark 服务上注册。请从 Bark App 重新复制完整推送地址。",
+            "The current Device Key is not registered with this Bark server. Copy the full push URL from the Bark app again."
+        )
     }
 
     // MARK: - App and services
@@ -202,12 +219,52 @@ public enum AppText {
 
     public static var generalTab: String { text("通用", "General") }
     public static var historyTab: String { text("记录", "History") }
+    public static var versionTab: String { text("版本", "Version") }
+    public static var generalSettingsDescription: String {
+        text(
+            "设置 CoPing 的显示语言、通知和启动行为。",
+            "Choose CoPing's language, notification, and startup behavior."
+        )
+    }
+    public static var barkSettingsDescription: String {
+        text(
+            "配置 CoPing 如何通过 Bark 向你的 iPhone 发送通知。",
+            "Configure how CoPing sends notifications to your iPhone through Bark."
+        )
+    }
+    public static var codexSettingsDescription: String {
+        text(
+            "连接本机 Codex，并管理 Hook 的安装与信任状态。",
+            "Connect local Codex and manage Hook installation and trust."
+        )
+    }
+    public static var historySettingsDescription: String {
+        text(
+            "查看最近的通知发送结果；不保存提示词或回复正文。",
+            "Review recent delivery results. Prompts and responses are never stored."
+        )
+    }
+    public static var versionSettingsDescription: String {
+        text(
+            "查看当前版本，并从 GitHub Releases 检查和下载更新。",
+            "View the current version and check GitHub Releases for updates."
+        )
+    }
     public static var settingsSidebarAccessibilityLabel: String {
         text("设置分类", "Settings sections")
     }
     public static var appVersionLabel: String { text("版本", "Version") }
     public static var currentVersionLabel: String {
         text("当前版本", "Current version")
+    }
+    public static var unknownVersion: String {
+        text("未知", "Unknown")
+    }
+    public static var invalidCurrentVersion: String {
+        text(
+            "当前 App 包缺少有效版本号。",
+            "The current app bundle does not contain a valid version."
+        )
     }
     public static var languageSection: String { text("语言", "Language") }
     public static var languagePickerLabel: String {
@@ -232,6 +289,15 @@ public enum AppText {
         text(
             "关闭后仍会接收 Codex 事件，但不会发送到 Bark。",
             "CoPing will still receive Codex events, but will not send them to Bark."
+        )
+    }
+    public static var ignorePermissionNotifications: String {
+        text("忽略审批通知", "Ignore approval notifications")
+    }
+    public static var ignorePermissionNotificationsHelp: String {
+        text(
+            "如果你使用“替我审批”，建议开启。开启后 CoPing 不再发送任何审批通知；任务完成和提问通知不受影响。",
+            "Turn this on if you use “Review for me.” CoPing will stop all approval notifications; completion and question notifications are unaffected."
         )
     }
     public static var startupSection: String { text("启动", "Startup") }
@@ -259,6 +325,126 @@ public enum AppText {
             "Not supported in \(version)"
         )
     }
+    public static var softwareUpdate: String {
+        text("软件更新", "Software Update")
+    }
+    public static var checkForUpdates: String {
+        text("检查更新", "Check for Updates")
+    }
+    public static var checkForUpdatesHelp: String {
+        text(
+            "手动检查 GitHub 上最新的正式版本。",
+            "Manually check the latest stable release on GitHub."
+        )
+    }
+    public static var checkingForUpdates: String {
+        text("正在检查更新…", "Checking for updates…")
+    }
+    public static var upToDate: String {
+        text("当前已是最新版", "CoPing is up to date")
+    }
+    public static var updateAvailable: String {
+        text("发现新版本", "Update available")
+    }
+    public static func latestVersionValue(_ version: String) -> String {
+        text("最新版本 \(version)", "Latest version \(version)")
+    }
+    public static var downloadUpdate: String {
+        text("下载更新", "Download Update")
+    }
+    public static var download: String {
+        text("下载", "Download")
+    }
+    public static func downloadingVersion(_ version: String) -> String {
+        text("正在下载 \(version)…", "Downloading \(version)…")
+    }
+    public static var cancelDownload: String {
+        text("取消", "Cancel")
+    }
+    public static var downloadComplete: String {
+        text("下载完成", "Download complete")
+    }
+    public static func downloadedVersion(_ version: String) -> String {
+        text(
+            "CoPing \(version) 已保存到所选位置。",
+            "CoPing \(version) was saved to the selected location."
+        )
+    }
+    public static var showInFinder: String {
+        text("在 Finder 中显示", "Show in Finder")
+    }
+    public static var updateFailed: String {
+        text("更新失败", "Update failed")
+    }
+    public static var retryDownload: String {
+        text("重新下载", "Retry Download")
+    }
+    public static var chooseDownloadLocation: String {
+        text("选择更新包的保存位置", "Choose Where to Save the Update")
+    }
+    public static var updateInvalidResponse: String {
+        text(
+            "GitHub 返回了无法识别的响应。",
+            "GitHub returned an unrecognized response."
+        )
+    }
+    public static var noPublishedRelease: String {
+        text(
+            "GitHub 上还没有可用的正式版本。",
+            "No stable release is available on GitHub yet."
+        )
+    }
+    public static var noPublishedReleaseTitle: String {
+        text("暂无正式版本", "No Stable Release")
+    }
+    public static func updateHTTPFailure(_ status: Int) -> String {
+        text(
+            "检查更新失败（HTTP \(status)）。",
+            "Failed to check for updates (HTTP \(status))."
+        )
+    }
+    public static var invalidReleaseMetadata: String {
+        text(
+            "GitHub Release 的版本信息无效。",
+            "The GitHub Release has invalid version metadata."
+        )
+    }
+    public static func missingReleaseAsset(_ name: String) -> String {
+        text(
+            "GitHub Release 缺少 \(name)。",
+            "The GitHub Release is missing \(name)."
+        )
+    }
+    public static var insecureReleaseAsset: String {
+        text(
+            "GitHub Release 提供了不安全的下载地址。",
+            "The GitHub Release provided an insecure download URL."
+        )
+    }
+    public static var downloadInvalidResponse: String {
+        text(
+            "下载服务器返回了无法识别的响应。",
+            "The download server returned an unrecognized response."
+        )
+    }
+    public static func downloadHTTPFailure(_ status: Int) -> String {
+        text(
+            "下载更新失败（HTTP \(status)）。",
+            "Failed to download the update (HTTP \(status))."
+        )
+    }
+    public static var invalidReleaseChecksum: String {
+        text(
+            "Release 校验文件格式无效。",
+            "The release checksum file is invalid."
+        )
+    }
+    public static var releaseChecksumMismatch: String {
+        text(
+            "下载文件校验失败，文件没有保存。",
+            "The downloaded file failed verification and was not saved."
+        )
+    }
     public static var serviceSection: String { text("服务", "Service") }
     public static var httpsServerAddress: String {
         text("HTTPS 服务地址", "HTTPS server address")
@@ -271,12 +457,12 @@ public enum AppText {
     }
     public static var deviceSection: String { text("设备", "Device") }
     public static var deviceKeyOrURL: String {
-        text("Device Key 或完整 Bark 地址", "Device Key or full Bark URL")
+        text("Bark 推送地址", "Bark push URL")
     }
     public static var deviceKeyHelp: String {
         text(
-            "可直接粘贴 Bark 复制的完整推送地址；CoPing 会自动提取 Device Key 并保存到 macOS 钥匙串。",
-            "Paste the full push URL copied from Bark. CoPing extracts the Device Key and stores it in macOS Keychain."
+            "在 iPhone 上打开 Bark，点击示例通知右侧的复制按钮，再把复制的完整地址粘贴到这里。CoPing 会自动完成设置。",
+            "On your iPhone, open Bark, tap the copy button next to an example notification, then paste the full URL here. CoPing will finish the setup automatically."
         )
     }
     public static var save: String { text("保存", "Save") }
@@ -294,14 +480,14 @@ public enum AppText {
     }
     public static var firstConnectionHelp: String {
         text(
-            "CoPing 会安装用户级 Hook，然后打开一次终端。请在 Codex 中输入 /hooks，检查 CoPingHook 路径并选择信任全部。",
-            "CoPing installs user-level Hooks and opens Terminal once. In Codex, enter /hooks, verify the CoPingHook path, and trust all CoPing hooks."
+            "无需另行安装终端版 Codex。点击“连接 Codex”后，CoPing 会使用 Codex 桌面应用自带的版本，并自动打开终端。看到输入光标后，输入 /hooks 并按回车；在打开的列表中找到 CoPingHook，按界面提示选择“信任全部”。",
+            "You do not need to install the Codex CLI separately. After you click “Connect Codex,” CoPing uses the version included with the Codex desktop app and opens Terminal automatically. At the prompt, enter /hooks and press Return. Find CoPingHook in the list, then follow the on-screen instructions to trust all of its hooks."
         )
     }
     public static var firstConnectionVerificationHelp: String {
         text(
-            "完成后退出终端并新建一个 Codex 桌面任务；收到 SessionStart 后会自动显示“已连接”。",
-            "Exit Terminal and create a new Codex desktop task. CoPing will show “Connected” after receiving SessionStart."
+            "完成后，在终端里的 Codex 中输入 /quit 并按回车，再关闭终端窗口。然后回到 Codex 桌面应用，新建一个任务；CoPing 检测到后会自动显示“已连接”。",
+            "When finished, enter /quit in the Codex running in Terminal, press Return, and close the Terminal window. Then return to the Codex desktop app and create a new task. CoPing will automatically show “Connected” after detecting it."
         )
     }
     public static var connectCodex: String { text("连接 Codex", "Connect Codex") }
@@ -423,37 +609,86 @@ public enum AppText {
     // MARK: - Push notifications
 
     public static var testNotificationTitle: String {
-        text("CoPing · 测试通知", "CoPing · Test notification")
+        "CoPing"
     }
     public static var testNotificationBody: String {
-        text("CoPing 已成功连接 Bark", "CoPing connected to Bark successfully")
+        text("Bark 测试通知", "Bark test notification")
     }
     public static var completedNotificationTitle: String {
-        text("CoPing · Codex 任务完成", "CoPing · Codex task completed")
+        "CoPing"
     }
-    public static func completedNotificationBody(project: String) -> String {
-        text(
-            "\(project) — Codex 已完成任务",
-            "\(project) — Codex completed the task"
+    public static func completedNotificationBody(
+        taskTitle: String? = nil,
+        language: AppLanguage = .current
+    ) -> String {
+        if let taskTitle = notificationTaskTitle(taskTitle) {
+            return language.text(
+                chinese: "Codex [\(taskTitle)] 任务完成",
+                english: "Codex [\(taskTitle)] task completed"
+            )
+        }
+        return language.text(
+            chinese: "Codex 任务完成",
+            english: "Codex task completed"
         )
     }
     public static var permissionNotificationTitle: String {
-        text("CoPing · Codex 请求权限", "CoPing · Codex requests permission")
+        "CoPing"
     }
-    public static func permissionNotificationBody(project: String) -> String {
-        text(
-            "\(project) — Codex 请求了权限，请查看电脑",
-            "\(project) — Codex requested permission. Check your Mac."
+    public static func permissionNotificationBody(
+        taskTitle: String? = nil,
+        language: AppLanguage = .current
+    ) -> String {
+        if let taskTitle = notificationTaskTitle(taskTitle) {
+            return language.text(
+                chinese: "Codex [\(taskTitle)] 需要审批",
+                english: "Codex [\(taskTitle)] needs approval"
+            )
+        }
+        return language.text(
+            chinese: "Codex 需要审批",
+            english: "Codex needs approval"
         )
     }
     public static var questionNotificationTitle: String {
-        text("CoPing · Codex 提出问题", "CoPing · Codex asked a question")
+        "CoPing"
     }
-    public static func questionNotificationBody(project: String) -> String {
-        text(
-            "\(project) — Codex 提出了问题，请查看电脑",
-            "\(project) — Codex asked a question. Check your Mac."
+    public static func questionNotificationBody(
+        taskTitle: String? = nil,
+        language: AppLanguage = .current
+    ) -> String {
+        if let taskTitle = notificationTaskTitle(taskTitle) {
+            return language.text(
+                chinese: "Codex [\(taskTitle)] 等待回答",
+                english: "Codex [\(taskTitle)] is waiting for an answer"
+            )
+        }
+        return language.text(
+            chinese: "Codex 等待回答",
+            english: "Codex is waiting for an answer"
         )
+    }
+
+    private static func notificationTaskTitle(_ taskTitle: String?) -> String? {
+        guard let taskTitle else { return nil }
+
+        let singleLineTitle = taskTitle
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard !singleLineTitle.isEmpty else { return nil }
+
+        let widthLimit = 16
+        var displayedWidth = 0
+        let displayedCharacters = singleLineTitle.prefix { character in
+            let characterWidth = character.isASCII ? 1 : 2
+            guard displayedWidth + characterWidth <= widthLimit else { return false }
+            displayedWidth += characterWidth
+            return true
+        }
+        guard displayedCharacters.count < singleLineTitle.count else {
+            return singleLineTitle
+        }
+        return "\(displayedCharacters)..."
     }
 
     public static func hookStatus(event: String) -> String {

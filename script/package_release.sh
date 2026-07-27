@@ -5,9 +5,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUNDLE="$ROOT_DIR/dist/CoPing.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_RESOURCES="$APP_CONTENTS/Resources"
-ARCHIVE="$ROOT_DIR/dist/CoPing.zip"
+ARCHIVE_NAME="CoPing-macOS-arm64.zip"
+ARCHIVE="$ROOT_DIR/dist/$ARCHIVE_NAME"
+CHECKSUM="$ARCHIVE.sha256"
 SIGN_IDENTITY="${COPING_SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${COPING_NOTARY_PROFILE:-}"
+RELEASE_VERSION="$(bash "$ROOT_DIR/script/release_version.sh" "$ROOT_DIR")"
+BUILD_NUMBER="$(git -C "$ROOT_DIR" rev-list --count HEAD)"
 
 if [[ -z "$SIGN_IDENTITY" ]]; then
   echo "COPING_SIGN_IDENTITY is required (Developer ID Application identity)." >&2
@@ -32,12 +36,21 @@ swift build -c release --disable-sandbox --package-path "$ROOT_DIR"
 BIN_DIR="$(swift build -c release --disable-sandbox --package-path "$ROOT_DIR" --show-bin-path)"
 
 rm -rf "$APP_BUNDLE" "$ARCHIVE"
+rm -f "$CHECKSUM"
 mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Helpers" "$APP_RESOURCES"
 cp "$BIN_DIR/CoPing" "$APP_CONTENTS/MacOS/CoPing"
 cp "$BIN_DIR/CoPingHook" "$APP_CONTENTS/Helpers/CoPingHook"
 cp "$ROOT_DIR/Packaging/Info.plist" "$APP_CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c \
+  "Set :CFBundleShortVersionString $RELEASE_VERSION" \
+  "$APP_CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c \
+  "Set :CFBundleVersion $BUILD_NUMBER" \
+  "$APP_CONTENTS/Info.plist"
 cp "$ROOT_DIR/Packaging/CoPing.icns" "$APP_RESOURCES/CoPing.icns"
 cp "$ROOT_DIR/CoPing.icon/Assets/CoPing-orbit-mark.svg" "$APP_RESOURCES/CoPing-orbit-mark.svg"
+cp "$ROOT_DIR/Sources/CoPing/Resources/BarkIcon.png" "$APP_RESOURCES/BarkIcon.png"
+cp "$ROOT_DIR/Sources/CoPing/Resources/GitHubMark.svg" "$APP_RESOURCES/GitHubMark.svg"
 chmod +x "$APP_CONTENTS/MacOS/CoPing" "$APP_CONTENTS/Helpers/CoPingHook"
 
 /usr/bin/codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
@@ -52,4 +65,17 @@ xcrun stapler staple "$APP_BUNDLE"
 xcrun stapler validate "$APP_BUNDLE"
 spctl -a -vv --type execute "$APP_BUNDLE"
 
+# Recreate the downloadable archive after stapling so the shipped app contains
+# the notarization ticket that was just validated.
+rm -f "$ARCHIVE"
+/usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$ARCHIVE"
+
+(
+  cd "$ROOT_DIR/dist"
+  /usr/bin/shasum -a 256 "$ARCHIVE_NAME" > "$ARCHIVE_NAME.sha256"
+)
+
 echo "$APP_BUNDLE"
+echo "$ARCHIVE"
+echo "$CHECKSUM"
+echo "Version: $RELEASE_VERSION ($BUILD_NUMBER)"

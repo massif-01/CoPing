@@ -1,5 +1,7 @@
 import CoPingCore
+import CoPingAppSupport
 import Foundation
+import SQLite3
 
 private struct TestFailure: LocalizedError, CustomStringConvertible {
     let description: String
@@ -50,6 +52,34 @@ private func testPayloadSanitizer() throws {
     } catch HookPayloadError.unsupportedEvent {
         // Expected.
     }
+}
+
+private func testCodexNotificationPreferences() throws {
+    let defaultPreferences = CodexNotificationPreferences()
+    try check(
+        defaultPreferences.allows(.permissionRequested),
+        "Permission notifications were ignored by default"
+    )
+
+    let ignoringPermissions = CodexNotificationPreferences(
+        ignorePermissionNotifications: true
+    )
+    try check(
+        !ignoringPermissions.allows(.permissionRequested),
+        "Permission notifications were not ignored"
+    )
+    try check(
+        ignoringPermissions.allows(.completed),
+        "Completion notifications were affected"
+    )
+    try check(
+        ignoringPermissions.allows(.questionRequested),
+        "Question notifications were affected"
+    )
+    try check(
+        ignoringPermissions.allows(.sessionStarted),
+        "Connection events were affected"
+    )
 }
 
 private func testHookConfiguration() throws {
@@ -126,24 +156,45 @@ private func testSocketRoundTrip() throws {
     try check(received.value == expected, "Socket event changed in transit")
 }
 
-private func testKeychainAndHistory() throws {
-    let keychain = KeychainStore(
-        service: "com.coping.tests.\(UUID().uuidString)",
-        account: "device-key"
-    )
-    defer { try? keychain.delete() }
-    let initialKey = try keychain.read()
-    try check(initialKey == nil, "Fresh Keychain item was not empty")
-    try keychain.save("test-secret")
-    let savedKey = try keychain.read()
-    try check(savedKey == "test-secret", "Keychain round trip failed")
-    try keychain.delete()
-    let deletedKey = try keychain.read()
-    try check(deletedKey == nil, "Keychain item was not deleted")
-
+private func testDeviceKeyAndHistory() throws {
     let directory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("CoPingHistory-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("CoPingStorage-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
+
+    let configurationURL = directory.appendingPathComponent("config.json")
+    let deviceKeyStore = DeviceKeyStore(fileURL: configurationURL)
+    let initialKey = try deviceKeyStore.read()
+    try check(initialKey == nil, "Fresh Device Key file was not empty")
+    try deviceKeyStore.save("test-secret")
+    let savedKey = try deviceKeyStore.read()
+    try check(savedKey == "test-secret", "Device Key round trip failed")
+
+    let attributes = try FileManager.default.attributesOfItem(atPath: configurationURL.path)
+    let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
+    try check(permissions == 0o600, "Device Key file permissions were not 0600")
+
+    try deviceKeyStore.delete()
+    let deletedKey = try deviceKeyStore.read()
+    try check(deletedKey == nil, "Device Key file was not deleted")
+
+    let malformedConfiguration = Data("{broken".utf8)
+    try malformedConfiguration.write(to: configurationURL, options: [.atomic])
+    var malformedConfigurationRejected = false
+    do {
+        _ = try deviceKeyStore.read()
+    } catch {
+        malformedConfigurationRejected = true
+    }
+    try check(
+        malformedConfigurationRejected,
+        "Malformed Device Key configuration was treated as an empty configuration"
+    )
+    let retainedMalformedConfiguration = try Data(contentsOf: configurationURL)
+    try check(
+        retainedMalformedConfiguration == malformedConfiguration,
+        "Reading a malformed Device Key configuration modified the original file"
+    )
+
     let store = DeliveryHistoryStore(
         fileURL: directory.appendingPathComponent("history.json"),
         limit: 2
@@ -222,6 +273,15 @@ private func testBarkClient() async throws {
     } catch BarkError.invalidBaseURL {
         // Expected.
     }
+    do {
+        _ = try BarkClient(
+            baseURL: URL(string: "https://api.day.app/device-key")!,
+            deviceKey: "key"
+        )
+        throw TestFailure(description: "A public Bark URL containing a path was accepted")
+    } catch BarkError.invalidPublicBaseURL {
+        // Expected.
+    }
 
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [URLProtocolStub.self]
@@ -276,6 +336,29 @@ private func testBarkClient() async throws {
     } catch BarkError.rejected(503) {
         // Expected.
     }
+
+    URLProtocolStub.handler = { request in
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 400,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data(
+                #"{"code":400,"message":"failed to get device token: failed to get [secret-device-key] device token from database"}"#.utf8
+            )
+        )
+    }
+    do {
+        try await client.send(PushNotification(title: "Title", body: "Body"))
+        throw TestFailure(description: "An unregistered Bark key was accepted")
+    } catch BarkError.deviceKeyNotRegistered {
+        try check(
+            !(BarkError.deviceKeyNotRegistered.localizedDescription.contains("secret-device-key")),
+            "The Bark Device Key leaked through the localized error"
+        )
+    }
 }
 
 private func testLanguageResolution() throws {
@@ -314,6 +397,92 @@ private func testLanguageResolution() throws {
         AppLanguagePreference.english.resolve(preferredLanguages: ["zh-CN"]) == .english,
         "Manual English did not override the system language"
     )
+    try check(
+        AppText.completedNotificationBody(language: .simplifiedChinese)
+            == "Codex 任务完成",
+        "Chinese completion body should identify the Codex event"
+    )
+    try check(
+        AppText.completedNotificationBody(
+            taskTitle: "让推送显示对话名称",
+            language: .simplifiedChinese
+        ) == "Codex [让推送显示对话名...] 任务完成",
+        "Chinese completion body did not include the task title"
+    )
+    try check(
+        AppText.completedNotificationBody(language: .english)
+            == "Codex task completed",
+        "English completion body should identify the Codex event"
+    )
+    try check(
+        AppText.permissionNotificationBody(language: .simplifiedChinese)
+            == "Codex 需要审批",
+        "Chinese approval body should identify the required action"
+    )
+    try check(
+        AppText.permissionNotificationBody(
+            taskTitle: "让推送显示对话名称",
+            language: .simplifiedChinese
+        ) == "Codex [让推送显示对话名...] 需要审批",
+        "Chinese approval body did not include the task title"
+    )
+    try check(
+        AppText.permissionNotificationBody(language: .english)
+            == "Codex needs approval",
+        "English approval body should identify the required action"
+    )
+    try check(
+        AppText.questionNotificationBody(language: .simplifiedChinese)
+            == "Codex 等待回答",
+        "Chinese question body should identify the required action"
+    )
+    try check(
+        AppText.questionNotificationBody(
+            taskTitle: "让推送显示对话名称",
+            language: .simplifiedChinese
+        ) == "Codex [让推送显示对话名...] 等待回答",
+        "Chinese question body did not include the task title"
+    )
+    try check(
+        AppText.completedNotificationBody(
+            taskTitle: "这是一个超过十个字的中文任务名称",
+            language: .simplifiedChinese
+        ) == "Codex [这是一个超过十个...] 任务完成",
+        "A long Chinese task title was not limited to eight characters"
+    )
+    try check(
+        AppText.permissionNotificationBody(
+            taskTitle: "1234567890ABCDEF",
+            language: .english
+        ) == "Codex [1234567890ABCDEF] needs approval",
+        "An English task title at the limit was truncated"
+    )
+    try check(
+        AppText.questionNotificationBody(
+            taskTitle: "1234567890ABCDEFG",
+            language: .english
+        ) == "Codex [1234567890ABCDEF...] is waiting for an answer",
+        "A long English task title was not limited to sixteen characters"
+    )
+    try check(
+        AppText.questionNotificationBody(
+            taskTitle: "中文ABCD混合任务名",
+            language: .simplifiedChinese
+        ) == "Codex [中文ABCD混合任务...] 等待回答",
+        "A mixed-language task title did not use its displayed width"
+    )
+    try check(
+        AppText.completedNotificationBody(
+            taskTitle: "first line\nsecond line",
+            language: .english
+        ) == "Codex [first line secon...] task completed",
+        "A multiline task title was not normalized to one line before truncation"
+    )
+    try check(
+        AppText.questionNotificationBody(language: .english)
+            == "Codex is waiting for an answer",
+        "English question body should identify the required action"
+    )
 
     try check(
         AppText.terminalInstalled(language: .simplifiedChinese) == "CoPing 已安装监听器。",
@@ -329,6 +498,367 @@ private func testLanguageResolution() throws {
         localizedHTTPFailure == AppText.barkHTTPFailure(400),
         "Stored Bark HTTP failures did not follow the current language"
     )
+}
+
+private func testSemanticVersionAndChecksum() throws {
+    let current = try unwrap(
+        SemanticVersion(rawValue: "0.1.9"),
+        "A valid installed version was rejected"
+    )
+    let latest = try unwrap(
+        SemanticVersion(rawValue: "v0.1.10"),
+        "A valid release tag was rejected"
+    )
+    try check(latest > current, "Semantic versions were compared as strings")
+    try check(
+        SemanticVersion(rawValue: "0.1") == nil,
+        "A two-component version was accepted"
+    )
+    try check(
+        SemanticVersion(rawValue: "v0.1.0-beta") == nil,
+        "A prerelease version was accepted"
+    )
+
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CoPingRelease-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let archiveURL = directory.appendingPathComponent(AppRelease.archiveName)
+    try Data("abc".utf8).write(to: archiveURL)
+
+    let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    let actualHash = try ReleaseArchiveVerifier.sha256(of: archiveURL)
+    try check(
+        actualHash == expected,
+        "The release archive SHA-256 was incorrect"
+    )
+    let checksum = Data("\(expected)  \(AppRelease.archiveName)\n".utf8)
+    let parsedHash = try ReleaseArchiveVerifier.expectedSHA256(
+        from: checksum,
+        archiveName: AppRelease.archiveName
+    )
+    try check(
+        parsedHash == expected,
+        "The release checksum file was not parsed"
+    )
+
+    do {
+        _ = try ReleaseArchiveVerifier.expectedSHA256(
+            from: Data("\(expected)  other.zip\n".utf8),
+            archiveName: AppRelease.archiveName
+        )
+        throw TestFailure(description: "A checksum for another asset was accepted")
+    } catch ReleaseDownloadError.invalidChecksumFile {
+        // Expected.
+    }
+}
+
+private func testGitHubReleaseClient() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [URLProtocolStub.self]
+    let session = URLSession(configuration: configuration)
+    defer { URLProtocolStub.handler = nil }
+
+    URLProtocolStub.handler = { request in
+        try check(
+            request.url?.absoluteString
+                == "https://api.github.com/repos/massif-01/CoPing/releases/latest",
+            "The release client requested the wrong repository"
+        )
+        try check(
+            request.value(forHTTPHeaderField: "User-Agent") == "CoPing",
+            "The release client omitted its User-Agent"
+        )
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        let data = Data(
+            """
+            {
+              "tag_name":"v0.1.10",
+              "published_at":"2026-07-27T12:00:00Z",
+              "html_url":"https://github.com/massif-01/CoPing/releases/tag/v0.1.10",
+              "draft":false,
+              "prerelease":false,
+              "assets":[
+                {
+                  "name":"\(AppRelease.archiveName)",
+                  "browser_download_url":"https://github.com/massif-01/CoPing/releases/download/v0.1.10/\(AppRelease.archiveName)",
+                  "size":1024
+                },
+                {
+                  "name":"\(AppRelease.checksumName)",
+                  "browser_download_url":"https://github.com/massif-01/CoPing/releases/download/v0.1.10/\(AppRelease.checksumName)",
+                  "size":96
+                }
+              ]
+            }
+            """.utf8
+        )
+        return (response, data)
+    }
+
+    let release = try await GitHubReleaseClient(session: session).latestRelease()
+    try check(
+        release.version == SemanticVersion(rawValue: "0.1.10"),
+        "The latest release version was decoded incorrectly"
+    )
+    try check(
+        release.archive.name == AppRelease.archiveName,
+        "The release archive contract changed"
+    )
+
+    URLProtocolStub.handler = { request in
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data(
+                """
+                {
+                  "tag_name":"v0.1.10",
+                  "published_at":"2026-07-27T12:00:00Z",
+                  "html_url":"https://github.com/massif-01/CoPing/releases/tag/v0.1.10",
+                  "draft":false,
+                  "prerelease":false,
+                  "assets":[]
+                }
+                """.utf8
+            )
+        )
+    }
+    do {
+        _ = try await GitHubReleaseClient(session: session).latestRelease()
+        throw TestFailure(description: "A release missing its archive was accepted")
+    } catch GitHubReleaseError.missingAsset(AppRelease.archiveName) {
+        // Expected.
+    }
+
+    URLProtocolStub.handler = { request in
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data(
+                """
+                {
+                  "tag_name":"v0.1.10",
+                  "published_at":"2026-07-27T12:00:00Z",
+                  "html_url":"https://github.com/massif-01/CoPing/releases/tag/v0.1.10",
+                  "draft":false,
+                  "prerelease":false,
+                  "assets":[
+                    {
+                      "name":"\(AppRelease.archiveName)",
+                      "browser_download_url":"http://example.com/\(AppRelease.archiveName)",
+                      "size":1024
+                    },
+                    {
+                      "name":"\(AppRelease.checksumName)",
+                      "browser_download_url":"https://example.com/\(AppRelease.checksumName)",
+                      "size":96
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        )
+    }
+    do {
+        _ = try await GitHubReleaseClient(session: session).latestRelease()
+        throw TestFailure(description: "An insecure release asset URL was accepted")
+    } catch GitHubReleaseError.insecureAssetURL {
+        // Expected.
+    }
+
+    URLProtocolStub.handler = { request in
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 404,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data()
+        )
+    }
+    do {
+        _ = try await GitHubReleaseClient(session: session).latestRelease()
+        throw TestFailure(description: "A missing GitHub Release was accepted")
+    } catch GitHubReleaseError.noPublishedRelease {
+        // Expected.
+    }
+}
+
+private func testReleaseDownloader() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CoPingDownload-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let sourceURL = directory.appendingPathComponent("source.zip")
+    let archiveData = Data("verified archive".utf8)
+    try archiveData.write(to: sourceURL)
+    let hash = try ReleaseArchiveVerifier.sha256(of: sourceURL)
+    let checksumData = Data("\(hash)  \(AppRelease.archiveName)\n".utf8)
+
+    let archiveURL = URL(string: "https://github.com/example/\(AppRelease.archiveName)")!
+    let checksumURL = URL(string: "https://github.com/example/\(AppRelease.checksumName)")!
+    let release = AppRelease(
+        version: try unwrap(
+            SemanticVersion(rawValue: "0.1.1"),
+            "The downloader test version was invalid"
+        ),
+        tagName: "v0.1.1",
+        publishedAt: Date(timeIntervalSince1970: 0),
+        pageURL: URL(string: "https://github.com/example/release")!,
+        archive: ReleaseAsset(
+            name: AppRelease.archiveName,
+            downloadURL: archiveURL,
+            size: Int64(archiveData.count)
+        ),
+        checksum: ReleaseAsset(
+            name: AppRelease.checksumName,
+            downloadURL: checksumURL,
+            size: Int64(checksumData.count)
+        )
+    )
+
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [URLProtocolStub.self]
+    let session = URLSession(configuration: configuration)
+    URLProtocolStub.handler = { request in
+        let data = request.url == checksumURL ? checksumData : archiveData
+        return (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            data
+        )
+    }
+    defer { URLProtocolStub.handler = nil }
+
+    let destinationURL = directory.appendingPathComponent(AppRelease.archiveName)
+    try await ReleaseDownloader(session: session).download(release, to: destinationURL)
+    let savedData = try Data(contentsOf: destinationURL)
+    try check(
+        savedData == archiveData,
+        "The verified release archive was not saved"
+    )
+
+    URLProtocolStub.handler = { request in
+        let data = request.url == checksumURL
+            ? Data("\(String(repeating: "0", count: 64))  \(AppRelease.archiveName)\n".utf8)
+            : archiveData
+        return (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            data
+        )
+    }
+    let rejectedURL = directory.appendingPathComponent("rejected.zip")
+    do {
+        try await ReleaseDownloader(session: session).download(release, to: rejectedURL)
+        throw TestFailure(description: "A release with the wrong checksum was saved")
+    } catch ReleaseDownloadError.checksumMismatch {
+        try check(
+            !FileManager.default.fileExists(atPath: rejectedURL.path),
+            "A failed download left an unverified destination file"
+        )
+    }
+}
+
+private func testCodexTaskTitleResolver() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CoPingTitleResolver-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let databaseURL = directory.appendingPathComponent("state_5.sqlite")
+    var database: OpaquePointer?
+    guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+        throw TestFailure(description: "Could not create the task title test database")
+    }
+    defer { sqlite3_close(database) }
+
+    guard
+        sqlite3_exec(
+            database,
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+            nil,
+            nil,
+            nil
+        ) == SQLITE_OK,
+        sqlite3_exec(
+            database,
+            "INSERT INTO threads (id, title) VALUES ('session-1', '让推送显示对话名称')",
+            nil,
+            nil,
+            nil
+        ) == SQLITE_OK
+    else {
+        throw TestFailure(description: "Could not populate the task title test database")
+    }
+
+    let resolver = CodexTaskTitleResolver(codexDirectory: directory)
+    try check(
+        resolver.title(for: "session-1") == "让推送显示对话名称",
+        "The task title was not resolved by session ID"
+    )
+    try check(
+        resolver.title(for: "missing") == nil,
+        "A missing session unexpectedly resolved a task title"
+    )
+}
+
+@MainActor
+private func testNoticeLifecycle() async throws {
+    let presenter = NoticePresenter(autoDismissDelay: .milliseconds(20))
+
+    presenter.show("success", kind: .success)
+    try await Task.sleep(for: .milliseconds(80))
+    try check(presenter.current == nil, "Transient notice did not expire")
+
+    let persistentError = presenter.show("error", kind: .error)
+    try await Task.sleep(for: .milliseconds(80))
+    try check(
+        presenter.current == persistentError,
+        "Error notice expired without explicit dismissal"
+    )
+    presenter.dismiss(id: persistentError.id)
+
+    let superseded = presenter.show("old", kind: .information)
+    let replacement = presenter.show("new error", kind: .error)
+    try await Task.sleep(for: .milliseconds(80))
+    try check(
+        presenter.current == replacement,
+        "A superseded notice task dismissed the replacement"
+    )
+
+    presenter.dismiss(id: superseded.id)
+    try check(
+        presenter.current == replacement,
+        "A stale notice ID dismissed the current notice"
+    )
+
+    presenter.dismiss(id: replacement.id)
+    try check(presenter.current == nil, "Explicit notice dismissal failed")
 }
 
 private func bodyData(from request: URLRequest) throws -> Data {
@@ -363,6 +893,11 @@ private func castHooks(_ root: [String: Any]) throws -> [String: Any] {
     return hooks
 }
 
+private func unwrap<Value>(_ value: Value?, _ message: String) throws -> Value {
+    guard let value else { throw TestFailure(description: message) }
+    return value
+}
+
 private enum StubError: Error {
     case missingHandler
 }
@@ -391,10 +926,16 @@ private struct CoPingSelfTests {
     static func main() async {
         do {
             try testPayloadSanitizer()
+            try testCodexNotificationPreferences()
+            try testCodexTaskTitleResolver()
             try testHookConfiguration()
             try testSocketRoundTrip()
-            try testKeychainAndHistory()
+            try testDeviceKeyAndHistory()
+            try testSemanticVersionAndChecksum()
             try testLanguageResolution()
+            try await testNoticeLifecycle()
+            try await testGitHubReleaseClient()
+            try await testReleaseDownloader()
             try await testBarkClient()
             print("CoPingSelfTests: PASS")
         } catch {

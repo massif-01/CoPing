@@ -5,50 +5,66 @@ struct BarkSettingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        SettingsPage("Bark") {
-            Form {
-                Section(AppText.serviceSection) {
+        SettingsPage(
+            "Bark",
+            subtitle: AppText.barkSettingsDescription,
+            systemImage: "iphone.radiowaves.left.and.right",
+            imageResourceName: "BarkIcon",
+            tint: .blue
+        ) {
+            SettingsCard {
+                SettingsRow(
+                    systemImage: "server.rack",
+                    tint: .blue,
+                    title: AppText.httpsServerAddress,
+                    subtitle: AppText.barkServerHelp
+                ) {
                     TextField(
-                        AppText.httpsServerAddress,
+                        "",
                         text: $model.baseURLString
                     )
-
-                    Text(AppText.barkServerHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 280)
                 }
 
-                Section(AppText.deviceSection) {
+                SettingsCardDivider()
+
+                SettingsRow(
+                    systemImage: "key.fill",
+                    tint: .orange,
+                    title: AppText.deviceKeyOrURL,
+                    subtitle: AppText.deviceKeyHelp
+                ) {
                     SecureField(
-                        AppText.deviceKeyOrURL,
+                        "",
                         text: $model.deviceKey
                     )
-
-                    Text(AppText.deviceKeyHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    HStack {
-                        Spacer()
-
-                        Button(AppText.save) {
-                            model.saveBarkSettings()
-                        }
-                        .copingSecondaryButtonStyle()
-
-                        Button(AppText.saveAndSendTest) {
-                            model.sendTestNotification()
-                        }
-                        .copingPrimaryButtonStyle()
-                        .disabled(model.isBusy)
-                    }
-                    .controlSize(.regular)
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 280)
                 }
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+
+            HStack {
+                Spacer()
+
+                Button(AppText.save) {
+                    model.saveBarkSettings()
+                }
+                .copingSecondaryButtonStyle()
+
+                Button {
+                    model.sendTestNotification()
+                } label: {
+                    Text(AppText.saveAndSendTest)
+                        .foregroundStyle(.white)
+                }
+                .copingPrimaryButtonStyle()
+                .disabled(model.isBusy)
+            }
+            .controlSize(.regular)
+            .padding(.horizontal, 4)
         }
     }
 }

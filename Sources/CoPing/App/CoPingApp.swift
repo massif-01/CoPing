@@ -3,22 +3,9 @@ import CoPingCore
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var qaWindow: NSWindow?
-    private var qaModel: AppModel?
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard ProcessInfo.processInfo.arguments.contains("--show-settings") else { return }
         NSApp.setActivationPolicy(.regular)
-        let model = AppModel(startServices: false)
-        let controller = NSHostingController(rootView: SettingsView(model: model))
-        let window = NSWindow(contentViewController: controller)
-        window.title = AppText.settingsWindowTitle
-        window.setContentSize(NSSize(width: 760, height: 500))
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        qaModel = model
-        qaWindow = window
-        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -31,16 +18,16 @@ struct CoPingApp: App {
         MenuBarExtra {
             MenuContentView(model: model)
         } label: {
-            Image(nsImage: Self.menuBarImage)
-                .accessibilityLabel("CoPing")
+            MenuBarLabel(image: Self.menuBarImage)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView(model: model)
         }
-        .defaultSize(width: 760, height: 500)
-        .windowResizability(.contentSize)
+        .defaultSize(width: 840, height: 656)
+        .windowResizability(.automatic)
+        .windowToolbarStyle(.unified(showsTitle: false))
     }
 
     private static let menuBarImage: NSImage = {
@@ -49,13 +36,74 @@ struct CoPingApp: App {
                 forResource: "CoPing-orbit-mark",
                 withExtension: "svg"
             ),
-            let image = NSImage(contentsOf: url)
+            let mark = NSImage(contentsOf: url)
         else {
             fatalError("Missing CoPing menu bar icon resource")
         }
 
-        image.size = NSSize(width: 18, height: 18)
+        let size = NSSize(width: 18.8568, height: 18.8568)
+        let visualScale = 0.95
+        let visualInset = size.width * (1 - visualScale) / 2
+        let image = NSImage(size: size, flipped: false) { bounds in
+            let visualBounds = bounds.insetBy(dx: visualInset, dy: visualInset)
+            let outerShape = NSBezierPath(
+                roundedRect: visualBounds.insetBy(
+                    dx: 0.6 * visualScale,
+                    dy: 0.6 * visualScale
+                ),
+                xRadius: 4.8 * visualScale,
+                yRadius: 4.8 * visualScale
+            )
+            NSColor.black.setFill()
+            outerShape.fill()
+
+            let sourceScale = 0.95
+            let inset = visualBounds.width * (1 - sourceScale) / 2
+            mark.draw(
+                in: visualBounds.insetBy(dx: inset, dy: inset),
+                from: .zero,
+                operation: .destinationOut,
+                fraction: 1,
+                respectFlipped: true,
+                hints: [.interpolation: NSImageInterpolation.high]
+            )
+            return true
+        }
+
         image.isTemplate = true
         return image
     }()
+}
+
+private struct MenuBarLabel: View {
+    let image: NSImage
+
+    @Environment(\.openSettings) private var openSettings
+    @State private var didOpenSettingsForQA = false
+
+    var body: some View {
+        Image(nsImage: image)
+            .accessibilityLabel("CoPing")
+            .task {
+                guard
+                    ProcessInfo.processInfo.arguments.contains("--show-settings"),
+                    !didOpenSettingsForQA
+                else {
+                    return
+                }
+
+                didOpenSettingsForQA = true
+                openSettings()
+
+                try? await Task.sleep(for: .milliseconds(100))
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                NSApplication.shared.windows
+                    .first {
+                        $0.isVisible
+                            && $0.styleMask.contains(.titled)
+                            && !($0 is NSPanel)
+                    }?
+                    .makeKeyAndOrderFront(nil)
+            }
+    }
 }
