@@ -8,10 +8,12 @@ struct MenuContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 11) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .frame(width: 34, height: 34)
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 38, height: 38)
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("CoPing")
