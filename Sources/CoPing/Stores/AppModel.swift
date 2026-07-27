@@ -197,7 +197,7 @@ final class AppModel: ObservableObject {
             Task {
                 await deliver(
                     PushNotification(
-                        title: "CoPing · 任务完成",
+                        title: "CoPing · Codex 任务完成",
                         body: "\(event.projectName) — Codex 已完成任务"
                     ),
                     for: event
@@ -217,17 +217,20 @@ final class AppModel: ObservableObject {
                 return
             }
             guard let self else { return }
+            let title: String
             let body: String
             switch event.type {
             case .permissionRequested:
+                title = "CoPing · Codex 请求权限"
                 body = "\(event.projectName) — Codex 请求了权限，请查看电脑"
             case .questionRequested:
+                title = "CoPing · Codex 提出问题"
                 body = "\(event.projectName) — Codex 提出了问题，请查看电脑"
             default:
                 return
             }
             await self.deliver(
-                PushNotification(title: "CoPing · 可能需要介入", body: body),
+                PushNotification(title: title, body: body),
                 for: event
             )
             self.pendingInterventions[event.turnKey] = nil
