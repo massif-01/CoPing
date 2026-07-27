@@ -4,11 +4,20 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
-    enum ConnectionStatus: String {
-        case disconnected = "未连接"
-        case awaitingVerification = "等待新任务验证"
-        case connected = "已连接"
-        case error = "配置异常"
+    enum ConnectionStatus {
+        case disconnected
+        case awaitingVerification
+        case connected
+        case error
+
+        var label: String {
+            switch self {
+            case .disconnected: return AppText.disconnected
+            case .awaitingVerification: return AppText.awaitingVerification
+            case .connected: return AppText.connected
+            case .error: return AppText.configurationError
+            }
+        }
     }
 
     @Published var baseURLString: String
@@ -54,7 +63,7 @@ final class AppModel: ObservableObject {
                 try socketServer.start()
             } catch {
                 connectionStatus = .error
-                statusMessage = "事件监听器启动失败。"
+                statusMessage = AppText.eventListenerStartFailed
             }
 
             if defaults.object(forKey: "didConfigureLoginItem") == nil {
@@ -73,10 +82,10 @@ final class AppModel: ObservableObject {
     }
 
     var menuStatusText: String {
-        if !notificationsEnabled { return "通知已暂停" }
-        if connectionStatus == .error { return "配置异常" }
-        if records.first?.outcome == .failed { return "最近推送失败" }
-        return connectionStatus.rawValue
+        if !notificationsEnabled { return AppText.notificationsPaused }
+        if connectionStatus == .error { return AppText.configurationError }
+        if records.first?.outcome == .failed { return AppText.recentPushFailed }
+        return connectionStatus.label
     }
 
     func saveBarkSettings() {
@@ -89,7 +98,7 @@ final class AppModel: ObservableObject {
             deviceKey = configuration.deviceKey
             baseURLString = configuration.baseURL.absoluteString
             defaults.set(baseURLString, forKey: "barkBaseURL")
-            statusMessage = "Bark 配置已保存。"
+            statusMessage = AppText.barkSettingsSaved
         } catch {
             statusMessage = error.localizedDescription
         }
@@ -107,7 +116,10 @@ final class AppModel: ObservableObject {
                 projectName: "CoPing"
             )
             await deliver(
-                PushNotification(title: "CoPing · 测试通知", body: "CoPing 已成功连接 Bark"),
+                PushNotification(
+                    title: AppText.testNotificationTitle,
+                    body: AppText.testNotificationBody
+                ),
                 for: event
             )
             isBusy = false
@@ -117,7 +129,7 @@ final class AppModel: ObservableObject {
     func connectCodex() {
         guard codexDetected else {
             connectionStatus = .error
-            statusMessage = "未检测到 /Applications/ChatGPT.app。"
+            statusMessage = AppText.chatGPTNotDetected
             return
         }
         isBusy = true
@@ -127,7 +139,7 @@ final class AppModel: ObservableObject {
             defaults.set(false, forKey: "codexConnectionVerified")
             connectionStatus = .awaitingVerification
             try HookTrustLauncher().openReviewTerminal()
-            statusMessage = "请在终端输入 /hooks，信任 CoPing 后退出。新建 Codex 任务即可完成验证。"
+            statusMessage = AppText.trustHooksStatus
         } catch {
             connectionStatus = .error
             statusMessage = error.localizedDescription
@@ -138,7 +150,7 @@ final class AppModel: ObservableObject {
     func openHookReview() {
         do {
             try HookTrustLauncher().openReviewTerminal()
-            statusMessage = "完成终端审核后，新建一个 Codex 任务进行验证。"
+            statusMessage = AppText.reviewFinishedStatus
         } catch {
             statusMessage = error.localizedDescription
         }
@@ -150,7 +162,7 @@ final class AppModel: ObservableObject {
             try helperInstaller.uninstall()
             defaults.set(false, forKey: "codexConnectionVerified")
             connectionStatus = .disconnected
-            statusMessage = "已断开，仅移除了 CoPing 自己的 Hook。"
+            statusMessage = AppText.disconnectedStatus
         } catch {
             connectionStatus = .error
             statusMessage = error.localizedDescription
@@ -170,7 +182,7 @@ final class AppModel: ObservableObject {
             statusMessage = nil
         } catch {
             launchAtLogin = loginManager.isEnabled
-            statusMessage = "登录启动设置失败：\(error.localizedDescription)"
+            statusMessage = AppText.loginItemFailure(error.localizedDescription)
         }
     }
 
@@ -179,7 +191,7 @@ final class AppModel: ObservableObject {
             try historyStore.clear()
             records = []
         } catch {
-            statusMessage = "无法清空记录。"
+            statusMessage = AppText.clearHistoryFailed
         }
     }
 
@@ -190,15 +202,15 @@ final class AppModel: ObservableObject {
         case .sessionStarted:
             defaults.set(true, forKey: "codexConnectionVerified")
             connectionStatus = .connected
-            statusMessage = "Codex 桌面事件连接已验证。"
+            statusMessage = AppText.codexConnectionVerified
         case .completed:
             pendingInterventions[event.turnKey]?.cancel()
             pendingInterventions[event.turnKey] = nil
             Task {
                 await deliver(
                     PushNotification(
-                        title: "CoPing · Codex 任务完成",
-                        body: "\(event.projectName) — Codex 已完成任务"
+                        title: AppText.completedNotificationTitle,
+                        body: AppText.completedNotificationBody(project: event.projectName)
                     ),
                     for: event
                 )
@@ -221,11 +233,11 @@ final class AppModel: ObservableObject {
             let body: String
             switch event.type {
             case .permissionRequested:
-                title = "CoPing · Codex 请求权限"
-                body = "\(event.projectName) — Codex 请求了权限，请查看电脑"
+                title = AppText.permissionNotificationTitle
+                body = AppText.permissionNotificationBody(project: event.projectName)
             case .questionRequested:
-                title = "CoPing · Codex 提出问题"
-                body = "\(event.projectName) — Codex 提出了问题，请查看电脑"
+                title = AppText.questionNotificationTitle
+                body = AppText.questionNotificationBody(project: event.projectName)
             default:
                 return
             }
@@ -239,11 +251,11 @@ final class AppModel: ObservableObject {
 
     private func deliver(_ notification: PushNotification, for event: CodexEvent) async {
         guard notificationsEnabled else {
-            appendRecord(for: event, outcome: .skipped, detail: "通知已暂停")
+            appendRecord(for: event, outcome: .skipped, detail: AppText.notificationsPaused)
             return
         }
         guard hasBarkConfiguration else {
-            appendRecord(for: event, outcome: .skipped, detail: "Bark 未配置")
+            appendRecord(for: event, outcome: .skipped, detail: AppText.barkNotConfigured)
             return
         }
 
@@ -259,7 +271,7 @@ final class AppModel: ObservableObject {
                 do {
                     try await client.send(notification)
                     appendRecord(for: event, outcome: .sent)
-                    statusMessage = "通知已发送。"
+                    statusMessage = AppText.notificationSent
                     return
                 } catch {
                     lastError = error
@@ -268,7 +280,7 @@ final class AppModel: ObservableObject {
             throw lastError ?? BarkError.invalidResponse
         } catch {
             appendRecord(for: event, outcome: .failed, detail: safeError(error))
-            statusMessage = "推送失败：\(safeError(error))"
+            statusMessage = AppText.pushFailed(safeError(error))
         }
     }
 
@@ -312,6 +324,6 @@ final class AppModel: ObservableObject {
         if let bark = error as? BarkError {
             return bark.localizedDescription
         }
-        return "网络请求失败"
+        return AppText.networkRequestFailed
     }
 }

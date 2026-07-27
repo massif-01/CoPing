@@ -8,9 +8,9 @@ enum HelperInstallerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .bundledHelperMissing:
-            return "CoPing.app 中缺少 CoPingHook helper。"
+            return AppText.bundledHelperMissing
         case .signatureInvalid:
-            return "CoPingHook 签名校验失败，未安装任何文件。"
+            return AppText.helperSignatureInvalid
         }
     }
 }

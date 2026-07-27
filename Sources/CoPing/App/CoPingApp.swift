@@ -1,4 +1,5 @@
 import AppKit
+import CoPingCore
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -11,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = AppModel(startServices: false)
         let controller = NSHostingController(rootView: SettingsView(model: model))
         let window = NSWindow(contentViewController: controller)
-        window.title = "CoPing 设置"
+        window.title = AppText.settingsWindowTitle
         window.setContentSize(NSSize(width: 560, height: 420))
         window.center()
         window.makeKeyAndOrderFront(nil)

@@ -12,6 +12,7 @@ CoPing 是一个原生 macOS 14+ 菜单栏工具，通过 Bark 将 Codex 桌面�
 - Five-second intervention debounce / 介入通知延迟 5 秒确认
 - Bark public or self-hosted HTTPS servers / Bark 公共或自建 HTTPS 服务
 - CoPing-branded Bark notification icon / 带 CoPing 品牌图标的 Bark 通知
+- Automatic English or Simplified Chinese UI based on the system language; all Chinese variants use Simplified Chinese / 根据系统语言自动使用英文或简体中文，所有中文变体统一映射为简体中文
 - Device Key stored in macOS Keychain / Device Key 保存于 macOS 钥匙串
 - Launch at login / 登录时自动启动
 

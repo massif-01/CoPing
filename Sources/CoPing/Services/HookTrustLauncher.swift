@@ -9,9 +9,9 @@ enum HookTrustLauncherError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .codexNotFound:
-            return "未在 /Applications/ChatGPT.app 中找到 Codex。"
+            return AppText.codexNotFound
         case .terminalLaunchFailed:
-            return "无法打开 Hook 审核终端。"
+            return AppText.terminalLaunchFailed
         }
     }
 }
@@ -29,13 +29,13 @@ struct HookTrustLauncher {
         let script = """
         #!/bin/zsh
         clear
-        echo 'CoPing 已安装监听器。'
-        echo '进入 Codex 后请输入 /hooks，然后检查 CoPingHook 路径并选择信任全部。'
-        echo '完成后输入 /quit 退出此窗口。'
+        echo \(shellQuote(AppText.terminalInstalled()))
+        echo \(shellQuote(AppText.terminalHooksInstruction()))
+        echo \(shellQuote(AppText.terminalQuitInstruction()))
         echo
         COPING_SETUP=1 \(codex) -C "$HOME"
         echo
-        echo '审核窗口已结束，现在可以关闭终端。'
+        echo \(shellQuote(AppText.terminalReviewFinished()))
         """
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(

@@ -7,7 +7,7 @@ public enum KeychainError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unexpectedStatus(let status):
-            return "钥匙串操作失败（\(status)）。"
+            return AppText.keychainOperationFailed(status)
         }
     }
 }

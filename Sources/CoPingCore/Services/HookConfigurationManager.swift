@@ -8,11 +8,11 @@ public enum HookConfigurationError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .malformedJSON:
-            return "现有 hooks.json 不是有效 JSON，CoPing 没有修改它。"
+            return AppText.malformedHooksJSON
         case .unexpectedShape:
-            return "现有 hooks.json 结构无法识别，CoPing 没有修改它。"
+            return AppText.unexpectedHooksShape
         case .helperMissing:
-            return "CoPingHook helper 尚未安装。"
+            return AppText.helperNotInstalled
         }
     }
 }
@@ -138,7 +138,7 @@ public struct HookConfigurationManager {
                 "type": "command",
                 "command": command,
                 "timeout": 1,
-                "statusMessage": "CoPing: \(event)",
+                "statusMessage": AppText.hookStatus(event: event),
             ]],
         ]
         if let matcher { group["matcher"] = matcher }

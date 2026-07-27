@@ -10,15 +10,15 @@ public enum BarkError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidBaseURL:
-            return "Bark 服务地址必须是有效的 HTTPS 地址。"
+            return AppText.invalidBarkBaseURL
         case .invalidDeviceKey:
-            return "请输入 Device Key，或粘贴 Bark 提供的完整推送地址。"
+            return AppText.invalidBarkDeviceKey
         case .invalidResponse:
-            return "Bark 返回了无法识别的响应。"
+            return AppText.invalidBarkResponse
         case .rejected(let status):
-            return "Bark 请求失败（HTTP \(status)）。"
+            return AppText.barkHTTPFailure(status)
         case .serverRejected(let code):
-            return "Bark 服务拒绝了请求（代码 \(code)）。"
+            return AppText.barkServerRejected(code)
         }
     }
 }

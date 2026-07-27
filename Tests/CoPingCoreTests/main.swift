@@ -278,6 +278,42 @@ private func testBarkClient() async throws {
     }
 }
 
+private func testLanguageResolution() throws {
+    for language in ["zh", "zh-Hans", "zh-CN", "zh-Hant", "zh-TW", "zh-HK", "zh_MO"] {
+        try check(
+            AppLanguage.resolve(preferredLanguages: [language]) == .simplifiedChinese,
+            "\(language) did not resolve to Simplified Chinese"
+        )
+    }
+
+    for language in ["en", "en-US", "ja-JP", "fr-FR", "de-DE"] {
+        try check(
+            AppLanguage.resolve(preferredLanguages: [language]) == .english,
+            "\(language) did not resolve to English"
+        )
+    }
+
+    try check(
+        AppLanguage.resolve(preferredLanguages: []) == .english,
+        "An empty language list did not fall back to English"
+    )
+
+    try check(
+        AppText.terminalInstalled(language: .simplifiedChinese) == "CoPing 已安装监听器。",
+        "Terminal guidance did not use Simplified Chinese"
+    )
+    try check(
+        AppText.terminalInstalled(language: .english) == "CoPing installed its event listeners.",
+        "Terminal guidance did not use English"
+    )
+
+    let localizedHTTPFailure = AppText.localizedHistoryDetail("Bark 请求失败（HTTP 400）。")
+    try check(
+        localizedHTTPFailure == AppText.barkHTTPFailure(400),
+        "Stored Bark HTTP failures did not follow the current language"
+    )
+}
+
 private func bodyData(from request: URLRequest) throws -> Data {
     if let body = request.httpBody { return body }
     guard let stream = request.httpBodyStream else {
@@ -341,6 +377,7 @@ private struct CoPingSelfTests {
             try testHookConfiguration()
             try testSocketRoundTrip()
             try testKeychainAndHistory()
+            try testLanguageResolution()
             try await testBarkClient()
             print("CoPingSelfTests: PASS")
         } catch {

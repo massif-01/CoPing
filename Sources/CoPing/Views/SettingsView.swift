@@ -7,7 +7,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettingsView(model: model)
-                .tabItem { Label("通用", systemImage: "gearshape") }
+                .tabItem { Label(AppText.generalTab, systemImage: "gearshape") }
 
             BarkSettingsView(model: model)
                 .tabItem { Label("Bark", systemImage: "iphone.radiowaves.left.and.right") }
@@ -16,7 +16,7 @@ struct SettingsView: View {
                 .tabItem { Label("Codex", systemImage: "terminal") }
 
             HistorySettingsView(model: model)
-                .tabItem { Label("记录", systemImage: "clock.arrow.circlepath") }
+                .tabItem { Label(AppText.historyTab, systemImage: "clock.arrow.circlepath") }
         }
         .frame(width: 560, height: 420)
         .overlay(alignment: .bottom) {
@@ -37,22 +37,22 @@ private struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
-            Section("通知") {
+            Section(AppText.notificationsSection) {
                 Toggle(
-                    "启用 CoPing 通知",
+                    AppText.enableNotifications,
                     isOn: Binding(
                         get: { model.notificationsEnabled },
                         set: { model.setNotificationsEnabled($0) }
                     )
                 )
-                Text("关闭后仍会接收 Codex 事件，但不会发送到 Bark。")
+                Text(AppText.notificationsDisabledHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("启动") {
+            Section(AppText.startupSection) {
                 Toggle(
-                    "登录 Mac 时自动启动",
+                    AppText.launchAtLogin,
                     isOn: Binding(
                         get: { model.launchAtLogin },
                         set: { model.setLaunchAtLogin($0) }
@@ -60,9 +60,9 @@ private struct GeneralSettingsView: View {
                 )
             }
 
-            Section("版本范围") {
-                LabeledContent("支持事件", value: "完成、权限请求、普通问题")
-                LabeledContent("执行失败", value: "v1 暂不支持")
+            Section(AppText.versionScopeSection) {
+                LabeledContent(AppText.supportedEventsLabel, value: AppText.supportedEventsValue)
+                LabeledContent(AppText.executionFailureLabel, value: AppText.notSupportedInV1)
             }
         }
         .formStyle(.grouped)
@@ -75,28 +75,28 @@ private struct BarkSettingsView: View {
 
     var body: some View {
         Form {
-            Section("服务") {
-                TextField("HTTPS 服务地址", text: $model.baseURLString)
+            Section(AppText.serviceSection) {
+                TextField(AppText.httpsServerAddress, text: $model.baseURLString)
                     .textFieldStyle(.roundedBorder)
-                Text("默认 https://api.day.app；自建服务也必须使用 HTTPS。")
+                Text(AppText.barkServerHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("设备") {
-                SecureField("Device Key 或完整 Bark 地址", text: $model.deviceKey)
+            Section(AppText.deviceSection) {
+                SecureField(AppText.deviceKeyOrURL, text: $model.deviceKey)
                     .textFieldStyle(.roundedBorder)
-                Text("可直接粘贴 Bark 复制的完整推送地址；CoPing 会自动提取 Device Key 并保存到 macOS 钥匙串。")
+                Text(AppText.deviceKeyHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             HStack {
                 Spacer()
-                Button("保存") {
+                Button(AppText.save) {
                     model.saveBarkSettings()
                 }
-                Button("保存并发送测试通知") {
+                Button(AppText.saveAndSendTest) {
                     model.sendTestNotification()
                 }
                 .buttonStyle(.borderedProminent)
@@ -113,40 +113,44 @@ private struct CodexSettingsView: View {
 
     var body: some View {
         Form {
-            Section("检测") {
+            Section(AppText.detectionSection) {
                 LabeledContent("ChatGPT.app") {
                     Label(
-                        model.codexDetected ? "已检测到" : "未检测到",
+                        model.codexDetected ? AppText.detected : AppText.notDetected,
                         systemImage: model.codexDetected ? "checkmark.circle.fill" : "xmark.circle.fill"
                     )
                     .foregroundStyle(model.codexDetected ? .green : .red)
                 }
-                LabeledContent("连接状态", value: model.connectionStatus.rawValue)
+                LabeledContent(AppText.connectionStatusLabel, value: model.connectionStatus.label)
             }
 
-            Section("首次连接") {
-                Text("CoPing 会安装用户级 Hook，然后打开一次终端。请在 Codex 中输入 /hooks，检查 CoPingHook 路径并选择信任全部。")
+            Section(AppText.firstConnectionSection) {
+                Text(AppText.firstConnectionHelp)
                     .font(.callout)
-                Text("完成后退出终端并新建一个 Codex 桌面任务；收到 SessionStart 后会自动显示“已连接”。")
+                Text(AppText.firstConnectionVerificationHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             HStack {
-                Button(model.connectionStatus == .disconnected ? "连接 Codex" : "修复连接") {
+                Button(
+                    model.connectionStatus == .disconnected
+                        ? AppText.connectCodex
+                        : AppText.repairConnection
+                ) {
                     model.connectCodex()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isBusy || !model.codexDetected)
 
-                Button("重新打开审核终端") {
+                Button(AppText.reopenReviewTerminal) {
                     model.openHookReview()
                 }
                 .disabled(!model.codexDetected)
 
                 Spacer()
 
-                Button("断开连接", role: .destructive) {
+                Button(AppText.disconnect, role: .destructive) {
                     model.disconnectCodex()
                 }
                 .disabled(model.connectionStatus == .disconnected)
@@ -164,9 +168,9 @@ private struct HistorySettingsView: View {
         VStack(spacing: 0) {
             if model.records.isEmpty {
                 ContentUnavailableView(
-                    "暂无通知记录",
+                    AppText.noNotificationHistory,
                     systemImage: "bell.slash",
-                    description: Text("这里只记录事件类型、项目名和发送结果。")
+                    description: Text(AppText.historyPrivacyHelp)
                 )
             } else {
                 List(model.records) { record in
@@ -176,7 +180,7 @@ private struct HistorySettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(eventName(record.eventType)) · \(record.projectName)")
                             if let detail = record.detail {
-                                Text(detail)
+                                Text(AppText.localizedHistoryDetail(detail))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -191,11 +195,11 @@ private struct HistorySettingsView: View {
 
             Divider()
             HStack {
-                Text("最多保留最近 100 条")
+                Text(AppText.historyLimit)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("清空记录", role: .destructive) {
+                Button(AppText.clearHistory, role: .destructive) {
                     model.clearHistory()
                 }
                 .disabled(model.records.isEmpty)
@@ -207,10 +211,10 @@ private struct HistorySettingsView: View {
 
     private func eventName(_ type: CodexEvent.EventType) -> String {
         switch type {
-        case .sessionStarted: return "连接"
-        case .completed: return "完成"
-        case .permissionRequested: return "权限请求"
-        case .questionRequested: return "普通问题"
+        case .sessionStarted: return AppText.connectionEvent
+        case .completed: return AppText.completionEvent
+        case .permissionRequested: return AppText.permissionEvent
+        case .questionRequested: return AppText.questionEvent
         }
     }
 

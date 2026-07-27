@@ -1,4 +1,5 @@
 import AppKit
+import CoPingCore
 import SwiftUI
 
 struct MenuContentView: View {
@@ -10,23 +11,23 @@ struct MenuContentView: View {
 
         Divider()
 
-        Button(model.notificationsEnabled ? "暂停通知" : "恢复通知") {
+        Button(model.notificationsEnabled ? AppText.pauseNotifications : AppText.resumeNotifications) {
             model.setNotificationsEnabled(!model.notificationsEnabled)
         }
 
-        Button("发送测试通知") {
+        Button(AppText.sendTestNotification) {
             model.sendTestNotification()
         }
         .disabled(!model.hasBarkConfiguration || model.isBusy)
 
         SettingsLink {
-            Text("设置…")
+            Text(AppText.settings)
         }
         .keyboardShortcut(",", modifiers: .command)
 
         Divider()
 
-        Button("退出 CoPing") {
+        Button(AppText.quitCoPing) {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q", modifiers: .command)
