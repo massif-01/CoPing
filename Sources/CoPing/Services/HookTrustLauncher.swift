@@ -29,13 +29,15 @@ struct HookTrustLauncher {
         let script = """
         #!/bin/zsh
         clear
-        echo \(shellQuote(AppText.terminalInstalled()))
-        echo \(shellQuote(AppText.terminalHooksInstruction()))
-        echo \(shellQuote(AppText.terminalQuitInstruction()))
+        echo \(shellQuote(AppText.terminalInstalled))
+        echo
+        echo \(shellQuote(AppText.terminalHooksInstruction))
+        echo
+        echo \(shellQuote(AppText.terminalQuitInstruction))
         echo
         COPING_SETUP=1 \(codex) -C "$HOME"
         echo
-        echo \(shellQuote(AppText.terminalReviewFinished()))
+        echo \(shellQuote(AppText.terminalReviewFinished))
         """
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(

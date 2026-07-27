@@ -1,28 +1,18 @@
-<div align="center">
-  <img src="assets/icon/CoPing-app-icon.png" width="160" alt="CoPing 图标">
+<p align="center">
+  <img src="assets/readme/coping-hero.png" width="100%" alt="CoPing：Codex 做完了，手机会告诉你">
+</p>
 
-  <h1>CoPing</h1>
-
-  <p><strong>Codex 做完了，手机会告诉你。</strong></p>
-
-  <p>
-    <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black">
-    <img alt="Swift" src="https://img.shields.io/badge/Swift-orange">
-    <img alt="Apache 2.0" src="https://img.shields.io/badge/License-Apache--2.0-blue">
-  </p>
-
-  <p>中文 · <a href="README.en.md">English</a></p>
-</div>
+<p align="center">中文 · <a href="README.en.md">English</a></p>
 
 macOS 菜单栏小工具。Codex 跑完，或者卡在那儿等你拍板时，就把通知推到手机上。
 
 ## 为什么做这个
 
-把任务扔给 Codex，人去忙别的——听起来挺美，实际上过一会儿还是要回来瞅一眼，不然不放心。不知道跑完没，不知道是不是在等我按权限。
+把任务扔给 Codex，自己去忙别的——听起来挺美，实际上过一会儿还是忍不住回来瞅一眼，不然不放心。不知道跑完没，有没有在等我批权限。
 
-这个循环很烦。CoPing 就是为了把它断掉。
+来回几次之后，索性做了这个工具。
 
-## v0.1.1 能做什么
+## 现在能做什么
 
 | 事件 | 处理方式 |
 | --- | --- |
@@ -36,10 +26,6 @@ macOS 菜单栏小工具。Codex 跑完，或者卡在那儿等你拍板时，�
 
 手机上批准操作、回答 Codex、远程控制——这版都没做。执行失败的通知也还没加。
 
-<p align="center">
-  <img src="assets/readme/push-notification.jpg" width="320" alt="CoPing 在 iPhone 锁屏上的任务完成通知">
-</p>
-
 ## 原理
 
 ```mermaid
@@ -52,9 +38,9 @@ flowchart LR
     F --> G["iPhone"]
 ```
 
-Codex 触发 Hook 时，随之调起的轻量 Helper 会先把提示词、回复、命令、完整路径这些东西刮掉，只留事件类型、会话 ID、项目名，走本机 Unix Socket 送进 CoPing。
+Codex 触发 Hook 时，会随之启动一个轻量 Helper，先把提示词、回复、命令、完整路径这些内容剔除，只留事件类型、会话 ID 和项目名，再通过本机 Unix Socket 送入 CoPing。
 
-通知上的标题要是人话，不能就显示一串 ID，所以 CoPing 拿会话 ID 在本机 Codex 数据库里查了一下。任务状态本身不靠查库，以 Hooks 事件为准。
+通知标题得让人看得懂，不能只甩一串 ID，所以 CoPing 会用会话 ID 去本机 Codex 数据库里查任务名。任务状态本身不依赖查库，以 Hooks 事件为准。
 
 通知从 Mac 直发到你的 Bark 服务，没有中间商。
 
@@ -83,7 +69,7 @@ open /Applications/CoPing.app
 
 打开 Bark，复制 Device Key，填进 CoPing 设置里。服务地址默认是 `https://api.day.app`，自建的话换成自己的。点"保存并发送测试通知"，手机收到了就好了。
 
-在 Bark 首页的示例 URL 卡片上，点图中圈出的复制按钮，就能复制 Device Key：
+在 Bark 首页的示例 URL 卡片上，点图中标注的复制按钮，就能复制 Device Key：
 
 <p align="center">
   <img src="assets/readme/copy-bark-device-key.png" width="640" alt="在 Bark 首页复制 Device Key 的按钮位置">
@@ -91,7 +77,7 @@ open /Applications/CoPing.app
 
 ### 接入 Codex
 
-进"设置 → Codex"，点"连接 Codex"，弹出的终端里输 `/hooks`，看一眼 `CoPingHook` 的路径，信任，关掉终端。然后在 Codex 里新建一个任务，等状态变"已连接"就行了。
+进"设置 → Codex"，点"连接 Codex"，弹出的终端里输 `/hooks`，找到 `CoPingHook` 的路径后点信任，再关掉终端。然后在 Codex 里新建一个对话，等状态变"已连接"就行了。
 
 连接时 CoPing 把配置合并进 `~/.codex/hooks.json`，你已有的 Hooks 不动，同时留一份带时间戳的备份。断开时只删自己写进去的那几条。
 
@@ -99,13 +85,13 @@ open /Applications/CoPing.app
 
 没有账号，没有服务器。
 
-进 App 之前事件就已经过滤过了——提示词、回复、命令、完整路径都不会进来。通知里可能有任务标题和项目名，方便认出是哪个任务。本地记录只存事件类型、项目名、时间和推送结果，不存对话内容。
+事件在进入 CoPing 之前就已经过滤过了——提示词、回复、命令、完整路径都不会进来。通知里可能有任务标题和项目名，方便认出是哪个任务。本地记录只存事件类型、项目名、时间和推送结果，不存对话内容。
 
 Device Key 存在 `~/Library/Application Support/CoPing/config.json`，权限 `0600`，不会出现在请求 URL 或日志里。同一用户下的其他进程能读到这个文件——如果介意，自建 Bark 就行。
 
 ## Roadmap
 
-### v0.1.1 — Bark 通知与手动更新 ✓
+### v0.1.2 — 连接确认、Bark 通知与手动更新 ✓
 
 - [x] 任务完成 / 权限请求 / 普通问题通知
 - [x] Bark 官方服务与自建服务
@@ -137,7 +123,7 @@ Device Key 存在 `~/Library/Application Support/CoPing/config.json`，权限 `0
 
 Swift + SwiftUI，不依赖 Electron、Python 或 Node.js。
 
-发布包必须从 `v主版本.次版本.修订版本`（例如 `v0.1.1`）Tag 对应的提交构建。打包脚本会自动把 Tag 写入 App Bundle，菜单和版本页不需要手动修改版本号。
+发布包必须从 `v主版本.次版本.修订版本`（例如 `v0.1.2`）Tag 对应的提交构建。打包脚本会自动把 Tag 写入 App Bundle，菜单和版本页不需要手动修改版本号。
 
 ## 协议
 

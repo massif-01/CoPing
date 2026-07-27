@@ -3,3 +3,8 @@ dist/
 .DS_Store
 *.xcodeproj/xcuserdata/
 work/
+
+# Local README preview inputs/exports that are not distributable assets.
+assets/readme/iphone-16-pro-black-titanium-portrait.png
+assets/readme/coping-overview.png
+assets/readme/coping-overview.svg

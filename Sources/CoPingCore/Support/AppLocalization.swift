@@ -146,44 +146,39 @@ public enum AppText {
         text("无法打开 Hook 审核终端。", "Unable to open the Hook review terminal.")
     }
 
-    public static func terminalInstalled(
-        language: AppLanguage = .current
-    ) -> String {
-        language.text(
-            chinese: "CoPing 已安装监听器。",
-            english: "CoPing installed its event listeners."
-        )
+    public static var terminalInstalled: String {
+        """
+        CoPing 已安装监听器。
+        CoPing hooks are installed.
+        """
     }
-    public static func terminalHooksInstruction(
-        language: AppLanguage = .current
-    ) -> String {
-        language.text(
-            chinese: "进入 Codex 后请输入 /hooks，然后检查 CoPingHook 路径并选择信任全部。",
-            english: "In Codex, enter /hooks, verify the CoPingHook path, and trust all CoPing hooks."
-        )
+    public static var terminalHooksInstruction: String {
+        """
+        在 Codex 中输入 /hooks，确认 CoPingHook 路径，然后选择“全部信任并继续”。
+        In Codex, enter /hooks, verify the CoPingHook path, then choose “Trust all and continue”.
+        """
     }
-    public static func terminalQuitInstruction(
-        language: AppLanguage = .current
-    ) -> String {
-        language.text(
-            chinese: "完成后输入 /quit 退出此窗口。",
-            english: "When finished, enter /quit to exit this window."
-        )
+    public static var terminalQuitInstruction: String {
+        """
+        完成后输入 /quit 并按回车。
+        When finished, enter /quit and press Return.
+
+        回到 Codex 桌面版，新建一个对话进行验证；不要使用安装前已经打开的旧对话。
+        Return to Codex Desktop and create a new conversation to verify the connection. Do not use a conversation opened before installation.
+        """
     }
-    public static func terminalReviewFinished(
-        language: AppLanguage = .current
-    ) -> String {
-        language.text(
-            chinese: "审核窗口已结束，现在可以关闭终端。",
-            english: "Hook review has finished. You can now close Terminal."
-        )
+    public static var terminalReviewFinished: String {
+        """
+        Hook 审核已结束，现在可以关闭终端。
+        Hook review has finished. You can now close Terminal.
+        """
     }
 
     // MARK: - Connection and menu
 
     public static var disconnected: String { text("未连接", "Not connected") }
     public static var awaitingVerification: String {
-        text("等待新任务验证", "Waiting for a new task")
+        text("等待新对话验证", "Waiting for a new conversation")
     }
     public static var connected: String { text("已连接", "Connected") }
     public static var configurationError: String {
@@ -486,8 +481,23 @@ public enum AppText {
     }
     public static var firstConnectionVerificationHelp: String {
         text(
-            "完成后，在终端里的 Codex 中输入 /quit 并按回车，再关闭终端窗口。然后回到 Codex 桌面应用，新建一个任务；CoPing 检测到后会自动显示“已连接”。",
-            "When finished, enter /quit in the Codex running in Terminal, press Return, and close the Terminal window. Then return to the Codex desktop app and create a new task. CoPing will automatically show “Connected” after detecting it."
+            "完成后输入 /quit 并关闭终端。安装前已经打开的旧对话可能不会加载新的监听器。",
+            "When finished, enter /quit and close Terminal. Conversations opened before installation may not load the new hooks."
+        )
+    }
+    public static var awaitingVerificationTitle: String {
+        text("还差最后一步", "One last step")
+    }
+    public static var awaitingVerificationHelp: String {
+        text(
+            "退出安装终端，回到 Codex 桌面版新建一个对话，并发送任意消息。",
+            "Exit the setup Terminal, return to Codex Desktop, create a new conversation, and send any message."
+        )
+    }
+    public static var awaitingVerificationTroubleshooting: String {
+        text(
+            "如果仍无反应，请完全退出并重新打开 Codex 后再试。",
+            "If nothing happens, quit Codex completely, reopen it, and try again."
         )
     }
     public static var connectCodex: String { text("连接 Codex", "Connect Codex") }
@@ -529,14 +539,14 @@ public enum AppText {
     }
     public static var trustHooksStatus: String {
         text(
-            "请在终端输入 /hooks，信任 CoPing 后退出。新建 Codex 任务即可完成验证。",
-            "In Terminal, enter /hooks, trust CoPing, and exit. Create a new Codex task to complete verification."
+            "请在终端输入 /hooks，信任 CoPing 后退出，再回到 Codex 桌面版新建对话。",
+            "In Terminal, enter /hooks, trust CoPing, and exit. Then return to Codex Desktop and create a new conversation."
         )
     }
     public static var reviewFinishedStatus: String {
         text(
-            "完成终端审核后，新建一个 Codex 任务进行验证。",
-            "After reviewing the Hooks in Terminal, create a new Codex task to verify the connection."
+            "完成终端审核后，请回到 Codex 桌面版新建对话进行验证。",
+            "After reviewing the hooks, return to Codex Desktop and create a new conversation to verify the connection."
         )
     }
     public static var disconnectedStatus: String {

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+  fill="none"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">CoPing Bark notification avatar</title>
+  <desc id="desc">
+    The CoPing orbit mark shifted into the upper-left safe area so the Bark
+    application badge does not cover the smaller circle.
+  </desc>
+
+  <rect width="1024" height="1024" fill="#FCF6ED"/>
+  <g transform="translate(36 -10) scale(0.72)" fill="#FD7B60" stroke="#FD7B60">
+    <path
+      fill="none"
+      d="
+        M 400 450
+        C 326 550, 305 680, 354 789
+        C 429 956, 626 1033, 811 950
+      "
+      stroke-width="31"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <circle cx="489" cy="383" r="125" stroke="none"/>
+    <circle cx="894" cy="892" r="59" stroke="none"/>
+  </g>
+</svg>

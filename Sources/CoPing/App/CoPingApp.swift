@@ -25,7 +25,7 @@ struct CoPingApp: App {
         Settings {
             SettingsView(model: model)
         }
-        .defaultSize(width: 840, height: 656)
+        .defaultSize(width: 840, height: 760)
         .windowResizability(.automatic)
         .windowToolbarStyle(.unified(showsTitle: false))
     }

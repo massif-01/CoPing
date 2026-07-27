@@ -24,7 +24,7 @@ struct SettingsView: View {
             idealWidth: 840,
             maxWidth: .infinity,
             minHeight: 560,
-            idealHeight: 656,
+            idealHeight: 760,
             maxHeight: .infinity
         )
         .modifier(SettingsWindowInteractions())

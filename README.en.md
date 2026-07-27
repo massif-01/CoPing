@@ -1,18 +1,8 @@
-<div align="center">
-  <img src="assets/icon/CoPing-app-icon.png" width="160" alt="CoPing">
+<p align="center">
+  <img src="assets/readme/coping-hero.png" width="100%" alt="CoPing: Codex is done, and your phone lets you know">
+</p>
 
-  <h1>CoPing</h1>
-
-  <p><strong>Your phone knows when Codex is done.</strong></p>
-
-  <p>
-    <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black">
-    <img alt="Swift" src="https://img.shields.io/badge/Swift-orange">
-    <img alt="Apache 2.0" src="https://img.shields.io/badge/License-Apache--2.0-blue">
-  </p>
-
-  <p><a href="README.md">中文</a> · English</p>
-</div>
+<p align="center"><a href="README.md">中文</a> · English</p>
 
 A macOS menu bar app. When Codex finishes a task — or gets stuck waiting on you — it pushes a notification to your phone via Bark.
 
@@ -22,7 +12,7 @@ The idea is simple: hand off a task to Codex, go do something else. In practice,
 
 CoPing kills that loop.
 
-## What v0.1.1 does
+## What it does
 
 | Event | What happens |
 | --- | --- |
@@ -32,13 +22,9 @@ CoPing kills that loop.
 
 The 5-second wait gives Codex a chance to sort things out on its own — it often does, and you don't need to know about it.
 
-Everything else in this version: Bark official server or self-hosted HTTPS; mute permission requests separately; last 100 push records; manually check and download GitHub Release updates; launch at login; follows system language, or you can pin it to Simplified Chinese or English.
+Also in this version: official Bark server or self-hosted HTTPS; mute permission-request notifications individually; push history for the last 100 events; manually check and download updates; launch at login; follows system language, with a manual override for Simplified Chinese or English.
 
 What it doesn't do: approve actions from your phone, reply to Codex, or remote-control anything. Failure notifications aren't in yet either.
-
-<p align="center">
-  <img src="assets/readme/push-notification.jpg" width="320" alt="CoPing task-complete notification on the iPhone Lock Screen">
-</p>
 
 ## How it works
 
@@ -77,7 +63,7 @@ xattr -dr com.apple.quarantine /Applications/CoPing.app
 open /Applications/CoPing.app
 ```
 
-This just removes the quarantine flag macOS puts on downloaded files — it doesn't change any system security settings. Don't do this for apps you didn't download yourself.
+This just removes the quarantine flag macOS puts on downloaded files — it doesn't change any system security settings. Never do this for apps from sources you don't trust.
 
 ### Set up Bark
 
@@ -91,7 +77,7 @@ On Bark's home screen, find the sample URL card and tap the circled copy button 
 
 ### Connect Codex
 
-Go to Settings → Codex and click "Connect Codex." A terminal window will open — type `/hooks`, verify the `CoPingHook` path looks right, trust all CoPing hooks, and close the terminal. Start a new task in Codex; once CoPing picks up the `SessionStart` event, the status will flip to Connected.
+Go to Settings → Codex and click "Connect Codex." A terminal window will open — type `/hooks`, verify the `CoPingHook` path looks right, trust all CoPing hooks, and close the terminal. Start a new conversation in Codex; once CoPing receives a supported Hook event, the status will switch to Connected.
 
 CoPing merges its entries into `~/.codex/hooks.json` without touching your other hooks, and keeps a timestamped backup. Disconnecting only removes the lines it added.
 
@@ -99,13 +85,13 @@ CoPing merges its entries into `~/.codex/hooks.json` without touching your other
 
 No account, no server.
 
-Events get scrubbed by the helper before they ever reach the app — prompts, replies, commands, and full paths don't make it through. Notifications may include the task title and project name, which is the whole point. Local records store only the event type, project name, timestamp, and delivery result — no conversation content.
+Events get scrubbed by the helper before they ever reach the app — prompts, replies, commands, and full paths don't make it through. Notifications may include the task title and project name — that's what makes them useful. Local records store only the event type, project name, timestamp, and delivery result — no conversation content.
 
 The Device Key lives in `~/Library/Application Support/CoPing/config.json` with `0600` permissions and never appears in request URLs or logs. Other processes running as the same macOS user can technically read that file — if that's a concern, running your own Bark server is the cleaner option.
 
 ## Roadmap
 
-### v0.1.1 — Bark notifications and manual updates ✓
+### v0.1.2 — connection verification, Bark notifications, and manual updates ✓
 
 - [x] Task complete / permission request / question notifications
 - [x] Bark official server and self-hosted
@@ -137,7 +123,7 @@ Not planning to push to both channels simultaneously in this version.
 
 Swift + SwiftUI. No Electron, no Python, no Node.js.
 
-Release archives must be built from a commit tagged `vMAJOR.MINOR.PATCH` (for example, `v0.1.1`). The packaging scripts inject that tag into the app bundle automatically, so the menu and Version page never need manual version edits.
+Release archives must be built from a commit tagged `vMAJOR.MINOR.PATCH` (for example, `v0.1.2`). The packaging scripts inject that tag into the app bundle automatically, so the menu and Version page never need manual version edits.
 
 ## License
 

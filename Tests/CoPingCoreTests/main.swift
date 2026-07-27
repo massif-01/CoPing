@@ -28,6 +28,7 @@ private func testPayloadSanitizer() throws {
     )
     let event = try HookPayloadSanitizer.sanitize(input, now: Date(timeIntervalSince1970: 1))
     try check(event.type == .completed, "Stop was not mapped to completed")
+    try check(event.verifiesConnection, "A supported Stop event did not verify the connection")
     try check(event.projectName == "SecretProject", "Project name was not reduced to basename")
     let encoded = String(decoding: try JSONEncoder().encode(event), as: UTF8.self)
     try check(!encoded.contains("secret"), "Sanitized event leaked private content")
@@ -40,6 +41,27 @@ private func testPayloadSanitizer() throws {
     )
     let questionEvent = try HookPayloadSanitizer.sanitize(question)
     try check(questionEvent.type == .questionRequested, "request_user_input was not mapped")
+    try check(
+        CodexEvent.EventType.allCases.allSatisfy {
+            CodexEvent(
+                type: $0,
+                sessionID: "connection-test",
+                turnID: nil,
+                projectName: "CoPing"
+            ).verifiesConnection
+        },
+        "A supported Codex event did not verify the connection"
+    )
+    try check(
+        !CodexEvent(
+            version: 2,
+            type: .sessionStarted,
+            sessionID: "unsupported-version",
+            turnID: nil,
+            projectName: "CoPing"
+        ).verifiesConnection,
+        "An unsupported event version verified the connection"
+    )
 
     let otherTool = Data(
         """
@@ -79,6 +101,62 @@ private func testCodexNotificationPreferences() throws {
     try check(
         ignoringPermissions.allows(.sessionStarted),
         "Connection events were affected"
+    )
+}
+
+private func testCodexConnectionStatus() throws {
+    for eventType in CodexEvent.EventType.allCases {
+        var status = CodexConnectionStatus.awaitingVerification
+        let event = CodexEvent(
+            type: eventType,
+            sessionID: "connection-test",
+            turnID: "turn",
+            projectName: "CoPing"
+        )
+        try check(
+            status.verify(with: event),
+            "\(eventType.rawValue) did not verify an awaiting connection"
+        )
+        try check(
+            status == .connected,
+            "\(eventType.rawValue) did not move the connection to connected"
+        )
+    }
+
+    let validEvent = CodexEvent(
+        type: .completed,
+        sessionID: "connection-test",
+        turnID: "turn",
+        projectName: "CoPing"
+    )
+    for initialStatus in [
+        CodexConnectionStatus.disconnected,
+        .connected,
+        .error,
+    ] {
+        var status = initialStatus
+        try check(
+            !status.verify(with: validEvent),
+            "\(initialStatus) accepted a connection event"
+        )
+        try check(status == initialStatus, "\(initialStatus) changed unexpectedly")
+    }
+
+    var awaiting = CodexConnectionStatus.awaitingVerification
+    let unsupportedEvent = CodexEvent(
+        version: 2,
+        type: .completed,
+        sessionID: "unsupported-version",
+        turnID: "turn",
+        projectName: "CoPing"
+    )
+    try check(
+        !awaiting.verify(with: unsupportedEvent),
+        "An unsupported event version verified the connection"
+    )
+    try check(
+        awaiting == .awaitingVerification,
+        "An unsupported event version changed the connection state"
     )
 }
 
@@ -300,6 +378,11 @@ private func testBarkClient() async throws {
             json["icon"] as? String == CoPingBrand.barkIconURL.absoluteString,
             "CoPing icon missing from Bark JSON"
         )
+        try check(
+            json["icon"] as? String
+                == "https://raw.githubusercontent.com/massif-01/CoPing/main/assets/icon/CoPing-bark-avatar-v2.png",
+            "Bark icon URL was not cache-busted"
+        )
         return (
             HTTPURLResponse(
                 url: request.url!,
@@ -485,12 +568,24 @@ private func testLanguageResolution() throws {
     )
 
     try check(
-        AppText.terminalInstalled(language: .simplifiedChinese) == "CoPing 已安装监听器。",
-        "Terminal guidance did not use Simplified Chinese"
+        AppText.terminalInstalled
+            == "CoPing 已安装监听器。\nCoPing hooks are installed.",
+        "Terminal setup text was not bilingual"
     )
     try check(
-        AppText.terminalInstalled(language: .english) == "CoPing installed its event listeners.",
-        "Terminal guidance did not use English"
+        AppText.terminalHooksInstruction.contains("全部信任并继续")
+            && AppText.terminalHooksInstruction.contains("Trust all and continue"),
+        "Terminal hook review instructions were not bilingual"
+    )
+    try check(
+        AppText.terminalQuitInstruction.contains("新建一个对话")
+            && AppText.terminalQuitInstruction.contains("create a new conversation"),
+        "Terminal verification instructions were not bilingual"
+    )
+    try check(
+        AppText.terminalReviewFinished.contains("审核已结束")
+            && AppText.terminalReviewFinished.contains("review has finished"),
+        "Terminal completion text was not bilingual"
     )
 
     let localizedHTTPFailure = AppText.localizedHistoryDetail("Bark 请求失败（HTTP 400）。")
@@ -927,6 +1022,7 @@ private struct CoPingSelfTests {
         do {
             try testPayloadSanitizer()
             try testCodexNotificationPreferences()
+            try testCodexConnectionStatus()
             try testCodexTaskTitleResolver()
             try testHookConfiguration()
             try testSocketRoundTrip()

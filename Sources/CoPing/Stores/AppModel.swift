@@ -7,29 +7,13 @@ import Foundation
 final class AppModel: ObservableObject {
     typealias Notice = NoticePresenter.Notice
 
-    enum ConnectionStatus {
-        case disconnected
-        case awaitingVerification
-        case connected
-        case error
-
-        var label: String {
-            switch self {
-            case .disconnected: return AppText.disconnected
-            case .awaitingVerification: return AppText.awaitingVerification
-            case .connected: return AppText.connected
-            case .error: return AppText.configurationError
-            }
-        }
-    }
-
     @Published var baseURLString: String
     @Published var deviceKey: String
     @Published var notificationsEnabled: Bool
     @Published var ignorePermissionNotifications: Bool
     @Published var launchAtLogin: Bool
     @Published var languagePreference: AppLanguagePreference
-    @Published var connectionStatus: ConnectionStatus
+    @Published var connectionStatus: CodexConnectionStatus
     @Published var notice: Notice?
     @Published var records: [DeliveryRecord]
     @Published var isBusy = false
@@ -167,8 +151,12 @@ final class AppModel: ObservableObject {
             _ = try hookManager.installConfiguration()
             defaults.set(false, forKey: "codexConnectionVerified")
             connectionStatus = .awaitingVerification
-            try HookTrustLauncher().openReviewTerminal()
-            showNotice(AppText.trustHooksStatus, kind: .information)
+            do {
+                try HookTrustLauncher().openReviewTerminal()
+                showNotice(AppText.trustHooksStatus, kind: .information)
+            } catch {
+                showNotice(error.localizedDescription, kind: .error)
+            }
         } catch {
             connectionStatus = .error
             showNotice(error.localizedDescription, kind: .error)
@@ -245,13 +233,18 @@ final class AppModel: ObservableObject {
     }
 
     private func receive(_ event: CodexEvent) {
-        guard event.version == 1, remember(event.uniqueKey) else { return }
+        guard event.verifiesConnection else { return }
+
+        if connectionStatus.verify(with: event) {
+            defaults.set(true, forKey: "codexConnectionVerified")
+            showNotice(AppText.codexConnectionVerified, kind: .success)
+        }
+
+        guard remember(event.uniqueKey) else { return }
 
         switch event.type {
         case .sessionStarted:
-            defaults.set(true, forKey: "codexConnectionVerified")
-            connectionStatus = .connected
-            showNotice(AppText.codexConnectionVerified, kind: .success)
+            break
         case .completed:
             pendingInterventions.removeValue(forKey: event.turnKey)?.task.cancel()
             let taskTitle = taskTitleResolver.title(for: event.sessionID)

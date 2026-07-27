@@ -35,6 +35,10 @@ public struct CodexEvent: Codable, Equatable, Sendable {
         [type.rawValue, sessionID, turnID ?? "-"].joined(separator: ":")
     }
 
+    public var verifiesConnection: Bool {
+        version == 1
+    }
+
     public var turnKey: String {
         [sessionID, turnID ?? "-"].joined(separator: ":")
     }

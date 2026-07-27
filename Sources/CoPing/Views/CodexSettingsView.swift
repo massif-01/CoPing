@@ -48,6 +48,40 @@ struct CodexSettingsView: View {
                 }
             }
 
+            if model.connectionStatus == .awaitingVerification {
+                SettingsCard {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.orange)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                Color.orange.opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 7)
+                            )
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(AppText.awaitingVerificationTitle)
+                                .fontWeight(.medium)
+
+                            Text(AppText.awaitingVerificationHelp)
+                                .font(.callout)
+
+                            Text(AppText.firstConnectionVerificationHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text(AppText.awaitingVerificationTroubleshooting)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(12)
+                }
+            }
+
             SettingsCard {
                 SettingsRow(
                     systemImage: "bell.slash.fill",
@@ -131,14 +165,26 @@ struct CodexSettingsView: View {
     }
 
     private var connectionIcon: String {
-        model.connectionStatus == .connected
-            ? "checkmark.circle.fill"
-            : "xmark.circle.fill"
+        switch model.connectionStatus {
+        case .connected:
+            "checkmark.circle.fill"
+        case .awaitingVerification:
+            "clock.fill"
+        case .disconnected:
+            "xmark.circle.fill"
+        case .error:
+            "exclamationmark.triangle.fill"
+        }
     }
 
     private var connectionColor: Color {
-        model.connectionStatus == .connected
-            ? Color(nsColor: .systemGreen)
-            : Color(nsColor: .systemRed)
+        switch model.connectionStatus {
+        case .connected:
+            Color(nsColor: .systemGreen)
+        case .awaitingVerification:
+            Color(nsColor: .systemOrange)
+        case .disconnected, .error:
+            Color(nsColor: .systemRed)
+        }
     }
 }

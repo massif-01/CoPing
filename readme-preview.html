@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CoPing README 静态视觉预览">
+  <link rel="icon" href="assets/icon/CoPing-app-icon.png">
+  <title>CoPing README Preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f8f8f5;
+      --surface: #efefea;
+      --surface-strong: #e5e5de;
+      --ink: #20201e;
+      --muted: #696963;
+      --line: #d4d4cc;
+      --accent: #e85f43;
+      --accent-strong: #bd4029;
+      --accent-soft: #ffe0d7;
+      --shadow: rgb(75 63 48 / 0.12);
+      --radius: 22px;
+      --max: 1180px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--bg);
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", Avenir, "SF Pro Display", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    figure,
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    .shell {
+      width: min(calc(100% - 48px), var(--max));
+      margin-inline: auto;
+    }
+
+    .hero {
+      min-height: 100dvh;
+      display: grid;
+      grid-template-columns: minmax(0, 1.06fr) minmax(320px, 0.72fr);
+      align-items: center;
+      gap: clamp(42px, 8vw, 104px);
+      padding-block: 48px;
+      overflow: hidden;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 2;
+    }
+
+    .brand-lockup {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: clamp(40px, 7vh, 70px);
+      font-size: 22px;
+      font-weight: 750;
+      letter-spacing: -0.035em;
+    }
+
+    .brand-lockup img {
+      width: 52px;
+      height: 52px;
+      border-radius: 13px;
+      box-shadow: 0 14px 38px var(--shadow);
+    }
+
+    h1 {
+      max-width: 720px;
+      margin-bottom: 28px;
+      font-size: clamp(48px, 6.3vw, 84px);
+      font-weight: 720;
+      letter-spacing: -0.065em;
+      line-height: 0.98;
+    }
+
+    h1 .accent {
+      display: block;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .hero-summary {
+      max-width: 545px;
+      margin-bottom: 38px;
+      color: var(--muted);
+      font-size: clamp(18px, 1.8vw, 22px);
+      line-height: 1.55;
+    }
+
+    .compatibility {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .compatibility span {
+      position: relative;
+    }
+
+    .compatibility span + span::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: -13px;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--line);
+    }
+
+    .hero-visual {
+      position: relative;
+      width: min(100%, 390px);
+      justify-self: center;
+      margin: 0;
+    }
+
+    .hero-visual::before {
+      content: "";
+      position: absolute;
+      inset: 14% -24% 15% -28%;
+      z-index: -1;
+      border-radius: 50%;
+      background: var(--accent-soft);
+    }
+
+    .iphone-device {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1350 / 2760;
+      padding: 3.6%;
+      border: 4px solid #202024;
+      border-radius: 12% / 5.8%;
+      background: #0c0c0e;
+      box-shadow:
+        0 38px 80px rgba(29, 23, 18, 0.18),
+        0 10px 24px rgba(29, 23, 18, 0.12);
+    }
+
+    .iphone-screen {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      border-radius: 9.5% / 4.6%;
+      background: #1d1a22;
+    }
+
+    .iphone-screen img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .section-kicker {
+      margin-bottom: 26px;
+      color: var(--accent-strong);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .section-title {
+      margin-bottom: 24px;
+      font-size: clamp(36px, 5vw, 64px);
+      line-height: 1.04;
+      letter-spacing: -0.05em;
+    }
+
+    .events {
+      display: grid;
+      grid-template-columns: 1.22fr 0.78fr;
+      gap: 1px;
+      margin-bottom: 132px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--line);
+    }
+
+    .events-intro,
+    .events-list {
+      background: var(--surface);
+    }
+
+    .events-intro {
+      display: flex;
+      min-height: 420px;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: clamp(36px, 6vw, 72px);
+    }
+
+    .events-intro h2 {
+      margin-bottom: 24px;
+      font-size: clamp(38px, 5vw, 64px);
+      line-height: 1.04;
+      letter-spacing: -0.05em;
+    }
+
+    .events-intro > p {
+      max-width: 560px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .events-list {
+      display: grid;
+      align-content: center;
+      padding: 26px clamp(26px, 4vw, 44px);
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 16px 1fr auto;
+      align-items: center;
+      gap: 16px;
+      padding: 25px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .event:last-child {
+      border-bottom: 0;
+    }
+
+    .event-indicator {
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+    }
+
+    .event strong {
+      display: block;
+      font-size: 16px;
+    }
+
+    .event small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .event-time {
+      color: var(--accent-strong);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .flow-section {
+      padding-bottom: 144px;
+    }
+
+    .flow-heading {
+      max-width: 720px;
+      margin-bottom: 58px;
+    }
+
+    .flow-heading p,
+    .privacy-copy > p,
+    .install-intro p {
+      max-width: 640px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-top: 1px solid var(--line);
+    }
+
+    .flow-item {
+      min-height: 240px;
+      padding: 28px 30px 30px 0;
+    }
+
+    .flow-item + .flow-item {
+      padding-left: 30px;
+      border-left: 1px solid var(--line);
+    }
+
+    .flow-item img {
+      width: 44px;
+      height: 44px;
+      margin-bottom: 38px;
+      opacity: 0.9;
+    }
+
+    .flow-item strong {
+      display: block;
+      margin-bottom: 15px;
+      font-size: 19px;
+      letter-spacing: -0.02em;
+    }
+
+    .flow-item p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .privacy {
+      display: grid;
+      grid-template-columns: minmax(0, 0.82fr) minmax(420px, 1.18fr);
+      align-items: center;
+      gap: clamp(48px, 8vw, 108px);
+      margin-bottom: 146px;
+    }
+
+    .privacy-visual {
+      position: relative;
+      min-height: 560px;
+      overflow: hidden;
+      border-radius: var(--radius);
+      background: var(--surface-strong);
+    }
+
+    .privacy-visual > img {
+      position: absolute;
+      left: 11%;
+      top: 8%;
+      width: 78%;
+      opacity: 0.13;
+      transform: rotate(-14deg);
+    }
+
+    .privacy-message {
+      position: absolute;
+      inset: auto 34px 34px;
+      padding: 30px;
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) - 5px);
+      background: var(--bg);
+      box-shadow: 0 22px 56px var(--shadow);
+    }
+
+    .privacy-message strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 24px;
+      letter-spacing: -0.035em;
+    }
+
+    .privacy-message p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .privacy-points {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px 30px;
+      margin-top: 38px;
+    }
+
+    .privacy-point {
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .privacy-point strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .privacy-point span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .install {
+      padding: clamp(48px, 7vw, 84px);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .install-intro {
+      max-width: 720px;
+      margin-bottom: 62px;
+    }
+
+    .install-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.86fr) minmax(420px, 1.14fr);
+      align-items: center;
+      gap: clamp(38px, 7vw, 82px);
+    }
+
+    .steps {
+      counter-reset: install;
+    }
+
+    .step {
+      position: relative;
+      padding: 2px 0 32px 52px;
+      counter-increment: install;
+    }
+
+    .step:last-child {
+      padding-bottom: 0;
+    }
+
+    .step::before {
+      content: counter(install);
+      position: absolute;
+      left: 0;
+      top: 0;
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      color: var(--accent-strong);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 18px;
+    }
+
+    .step p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .bark-shot {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) - 2px);
+      background: #fff;
+      box-shadow: 0 24px 70px var(--shadow);
+    }
+
+    .bark-shot img {
+      width: 100%;
+      aspect-ratio: 1178 / 904;
+      object-fit: cover;
+    }
+
+    .scope {
+      display: grid;
+      grid-template-columns: 0.65fr 1.35fr;
+      gap: 50px;
+      padding-block: 130px 118px;
+    }
+
+    .scope h2 {
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.08;
+      letter-spacing: -0.04em;
+    }
+
+    .scope-copy {
+      max-width: 700px;
+    }
+
+    .scope-copy p {
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .scope-copy p:first-child {
+      color: var(--ink);
+      font-size: 24px;
+      font-weight: 650;
+      letter-spacing: -0.025em;
+    }
+
+    .closing {
+      position: relative;
+      display: grid;
+      min-height: 420px;
+      place-items: center;
+      overflow: hidden;
+      border-radius: var(--radius);
+      background: var(--accent);
+      color: #fffaf5;
+      text-align: center;
+    }
+
+    .closing::before {
+      content: "";
+      position: absolute;
+      width: 560px;
+      height: 560px;
+      border: 74px solid rgb(255 250 245 / 0.14);
+      border-radius: 50%;
+      transform: translate(58%, 38%);
+    }
+
+    .closing-copy {
+      position: relative;
+      z-index: 1;
+      padding: 48px 24px;
+    }
+
+    .closing h2 {
+      max-width: 720px;
+      margin-bottom: 18px;
+      font-size: clamp(40px, 6vw, 72px);
+      line-height: 1;
+      letter-spacing: -0.055em;
+    }
+
+    .closing p {
+      margin-bottom: 0;
+      font-size: 18px;
+      opacity: 0.84;
+    }
+
+    footer {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 28px 50px;
+      align-items: start;
+      padding-block: 42px 56px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .footer-brand {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .footer-meta {
+      max-width: 760px;
+    }
+
+    @media (max-width: 900px) {
+      .hero {
+        min-height: 100dvh;
+        grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.68fr);
+        gap: 28px;
+      }
+
+      .brand-lockup {
+        margin-bottom: 44px;
+      }
+
+      h1 {
+        font-size: clamp(44px, 7vw, 60px);
+      }
+
+      .hero-visual {
+        width: min(100%, 342px);
+      }
+
+      .events,
+      .privacy,
+      .install-grid,
+      .scope {
+        grid-template-columns: 1fr;
+      }
+
+      .privacy-copy {
+        order: -1;
+      }
+
+      .scope {
+        gap: 18px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(calc(100% - 32px), var(--max));
+      }
+
+      .hero {
+        min-height: auto;
+        grid-template-columns: 1fr;
+        padding-block: 42px 88px;
+      }
+
+      .brand-lockup {
+        margin-bottom: 38px;
+      }
+
+      h1 {
+        font-size: clamp(43px, 13vw, 62px);
+      }
+
+      .hero-summary {
+        font-size: 18px;
+      }
+
+      .hero-visual {
+        width: min(82%, 340px);
+        margin-top: 28px;
+      }
+
+      .events {
+        margin-bottom: 96px;
+      }
+
+      .events-intro {
+        min-height: 340px;
+        padding: 38px 26px;
+      }
+
+      .events-list {
+        padding: 18px 26px;
+      }
+
+      .flow-section {
+        padding-bottom: 100px;
+      }
+
+      .flow {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .flow-item {
+        min-height: 220px;
+        padding: 26px 20px 28px 0;
+      }
+
+      .flow-item + .flow-item {
+        padding-left: 20px;
+      }
+
+      .flow-item:nth-child(3) {
+        padding-left: 0;
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+
+      .flow-item:nth-child(4) {
+        border-top: 1px solid var(--line);
+      }
+
+      .privacy {
+        margin-bottom: 96px;
+      }
+
+      .privacy-visual {
+        min-height: 460px;
+      }
+
+      .privacy-points {
+        grid-template-columns: 1fr;
+      }
+
+      .install {
+        padding: 42px 24px;
+      }
+
+      .install-grid {
+        gap: 52px;
+      }
+
+      .scope {
+        padding-block: 94px;
+      }
+
+      .scope-copy p:first-child {
+        font-size: 21px;
+      }
+
+      .closing {
+        min-height: 390px;
+      }
+
+      footer {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 430px) {
+      h1 {
+        font-size: 42px;
+      }
+
+      .compatibility span + span::before {
+        display: none;
+      }
+
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-item,
+      .flow-item + .flow-item,
+      .flow-item:nth-child(3) {
+        min-height: 0;
+        padding: 26px 0;
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+
+      .flow-item img {
+        margin-bottom: 22px;
+      }
+
+      .privacy-message {
+        inset: auto 18px 18px;
+        padding: 22px;
+      }
+    }
+
+    @media print {
+      @page {
+        size: 1440px 4548px;
+        margin: 0;
+      }
+
+      html,
+      body {
+        width: 1440px;
+        min-width: 1440px;
+        background: var(--bg);
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .hero {
+        min-height: 1000px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="shell hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <div class="brand-lockup">
+          <img src="assets/icon/CoPing-app-icon.png" alt="">
+          <span>CoPing</span>
+        </div>
+        <h1 id="hero-title">Codex 做完了，<span class="accent">手机会告诉你。</span></h1>
+        <p class="hero-summary">任务完成，或正在等你拍板。CoPing 让你不用反复回来检查。</p>
+        <div class="compatibility" aria-label="兼容性信息">
+          <span>macOS 14+</span>
+          <span>Codex 桌面端</span>
+          <span>Bark</span>
+          <span>Apache 2.0</span>
+        </div>
+      </div>
+
+      <figure class="hero-visual" aria-label="CoPing 在手机锁屏上的任务完成通知">
+        <div class="iphone-device">
+          <div class="iphone-screen">
+            <img src="assets/readme/push-notification.jpg" alt="手机锁屏收到 CoPing 的 Codex 任务完成通知">
+          </div>
+        </div>
+      </figure>
+    </section>
+
+    <section class="shell events" aria-labelledby="events-title">
+      <div class="events-intro">
+        <div>
+          <p class="section-kicker">不用守着任务</p>
+          <h2 id="events-title">把任务扔给 Codex，然后去做别的。</h2>
+        </div>
+        <p>CoPing 只在值得你回来时通知。短暂等待会被自动过滤，避免手机被无意义的提醒打断。</p>
+      </div>
+
+      <div class="events-list" aria-label="支持的 Codex 事件">
+        <div class="event">
+          <span class="event-indicator" aria-hidden="true"></span>
+          <div>
+            <strong>任务完成</strong>
+            <small>结果已经可以查看</small>
+          </div>
+          <span class="event-time">立即</span>
+        </div>
+        <div class="event">
+          <span class="event-indicator" aria-hidden="true"></span>
+          <div>
+            <strong>权限请求</strong>
+            <small>Codex 正在等你批准</small>
+          </div>
+          <span class="event-time">5 秒</span>
+        </div>
+        <div class="event">
+          <span class="event-indicator" aria-hidden="true"></span>
+          <div>
+            <strong>普通问题</strong>
+            <small>需要你补充信息</small>
+          </div>
+          <span class="event-time">5 秒</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="shell flow-section" aria-labelledby="flow-title">
+      <div class="flow-heading">
+        <h2 class="section-title" id="flow-title">从 Mac 直达你的手机。</h2>
+        <p>事件先在本机清理，再通过你选择的 Bark 服务发送。CoPing 没有中间服务器。</p>
+      </div>
+
+      <div class="flow">
+        <article class="flow-item">
+          <img src="assets/icon/CoPing-orbit-mark.svg" alt="">
+          <strong>Codex 触发 Hook</strong>
+          <p>任务完成、权限请求和普通问题，均以 Codex 的事件为准。</p>
+        </article>
+        <article class="flow-item">
+          <img src="assets/icon/CoPing-orbit-mark.svg" alt="">
+          <strong>Helper 清理内容</strong>
+          <p>提示词、回复、命令和完整路径在进入 App 前就被移除。</p>
+        </article>
+        <article class="flow-item">
+          <img src="assets/icon/CoPing-orbit-mark.svg" alt="">
+          <strong>本机 Socket 交付</strong>
+          <p>只保留事件类型、会话 ID 和项目名，通过 Unix Socket 送进 CoPing。</p>
+        </article>
+        <article class="flow-item">
+          <img src="assets/icon/CoPing-orbit-mark.svg" alt="">
+          <strong>Bark 推送</strong>
+          <p>Mac 直接请求 Bark 官方或自建 HTTPS 服务，手机随即收到通知。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="shell privacy" aria-labelledby="privacy-title">
+      <div class="privacy-visual">
+        <img src="assets/icon/CoPing-orbit-mark.svg" alt="">
+        <div class="privacy-message">
+          <strong>没有账号，没有服务器。</strong>
+          <p>通知链路属于你。CoPing 不接触对话正文，也不托管任何中间服务。</p>
+        </div>
+      </div>
+
+      <div class="privacy-copy">
+        <h2 class="section-title" id="privacy-title">只传递提醒，不搬走对话。</h2>
+        <p>通知里可以显示任务标题和项目名，方便你判断是否需要回来。对话内容不会进入本地记录。</p>
+        <div class="privacy-points">
+          <div class="privacy-point">
+            <strong>本机过滤</strong>
+            <span>敏感内容在进入 App 前移除</span>
+          </div>
+          <div class="privacy-point">
+            <strong>直连 Bark</strong>
+            <span>没有 CoPing 云端中转</span>
+          </div>
+          <div class="privacy-point">
+            <strong>最少记录</strong>
+            <span>仅保留事件、项目、时间和结果</span>
+          </div>
+          <div class="privacy-point">
+            <strong>配置可控</strong>
+            <span>支持 Bark 官方或自建服务</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="shell install" aria-labelledby="install-title">
+      <div class="install-intro">
+        <h2 class="section-title" id="install-title">三件事，然后不用再守着。</h2>
+        <p>需要 macOS 14+、Codex 桌面端，以及 iPhone 上的 Bark。</p>
+      </div>
+
+      <div class="install-grid">
+        <div class="steps">
+          <article class="step">
+            <strong>安装 CoPing</strong>
+            <p>从 GitHub Releases 下载 DMG，把 CoPing 拖进应用程序文件夹。</p>
+          </article>
+          <article class="step">
+            <strong>填入 Device Key</strong>
+            <p>在 Bark 首页复制 Device Key，回到 CoPing 保存并发送测试通知。</p>
+          </article>
+          <article class="step">
+            <strong>连接 Codex</strong>
+            <p>进入“设置 → Codex”，连接 Hook 并在 Codex 中确认信任。</p>
+          </article>
+        </div>
+
+        <figure class="bark-shot">
+          <img src="assets/readme/copy-bark-device-key.png" alt="Bark 首页中复制 Device Key 的按钮位置">
+        </figure>
+      </div>
+    </section>
+
+    <section class="shell scope" aria-labelledby="scope-title">
+      <h2 id="scope-title">这版没有假装无所不能。</h2>
+      <div class="scope-copy">
+        <p>CoPing 现在只负责把需要你注意的时刻送到手机。</p>
+        <p>手机上批准操作、回答 Codex、远程控制和执行失败通知还没有实现。范围明确，通知链路才能保持简单、可查和可信。</p>
+      </div>
+    </section>
+
+    <section class="shell closing" aria-labelledby="closing-title">
+      <div class="closing-copy">
+        <h2 id="closing-title">让 Codex 自己跑。<br>该回来时再回来。</h2>
+        <p>开源、免费，支持 Bark 官方与自建服务。</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    <div class="footer-brand">CoPing / Apache License 2.0</div>
+    <div class="footer-meta">Generic device frame for illustration.</div>
+  </footer>
+</body>
+</html>
