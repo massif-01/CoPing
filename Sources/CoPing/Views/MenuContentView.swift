@@ -26,7 +26,7 @@ struct MenuContentView: View {
                 Spacer()
             }
 
-            GlassCard {
+            GlassCard(clear: true) {
                 HStack(spacing: 12) {
                     Image(systemName: statusIcon)
                         .font(.title3.weight(.semibold))
@@ -89,7 +89,6 @@ struct MenuContentView: View {
         }
         .padding(16)
         .frame(width: 330)
-        .background(.ultraThinMaterial)
     }
 
     private var statusIcon: String {
