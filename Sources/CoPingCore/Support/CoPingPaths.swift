@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 public enum CoPingPaths {
@@ -38,10 +37,6 @@ public enum CoPingPaths {
     ) -> URL {
         applicationSupport(homeDirectory: homeDirectory)
             .appendingPathComponent("ntfy.json", isDirectory: false)
-    }
-
-    public static func socketPath(userID: uid_t = getuid()) -> String {
-        "/tmp/coping-\(userID).sock"
     }
 
     public static func codexIPCPath(

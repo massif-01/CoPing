@@ -66,12 +66,18 @@ public struct HookConfigurationManager {
         }
         root["hooks"] = hooks
 
+        let existingData = existed ? try Data(contentsOf: hooksURL) : nil
+        let data = try JSONSerialization.data(
+            withJSONObject: root,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        guard data != existingData else { return nil }
+
         try fileManager.createDirectory(
             at: hooksURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         let backup = existed ? try makeBackup() : nil
-        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: hooksURL, options: [.atomic])
         return backup
     }

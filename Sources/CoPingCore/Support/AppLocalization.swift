@@ -165,7 +165,6 @@ public enum AppText {
 
     // MARK: - App and services
 
-    public static var settingsWindowTitle: String { text("CoPing 设置", "CoPing Settings") }
     public static var bundledHelperMissing: String {
         text("CoPing.app 中缺少 CoPingHook helper。", "CoPing.app is missing the CoPingHook helper.")
     }
@@ -296,7 +295,6 @@ public enum AppText {
     public static var settingsSidebarAccessibilityLabel: String {
         text("设置分类", "Settings sections")
     }
-    public static var appVersionLabel: String { text("版本", "Version") }
     public static var currentVersionLabel: String {
         text("当前版本", "Current version")
     }
@@ -309,7 +307,6 @@ public enum AppText {
             "The current app bundle does not contain a valid version."
         )
     }
-    public static var languageSection: String { text("语言", "Language") }
     public static var languagePickerLabel: String {
         text("显示语言", "Display language")
     }
@@ -324,7 +321,6 @@ public enum AppText {
             "The default follows the system. All Chinese system languages use Simplified Chinese."
         )
     }
-    public static var notificationsSection: String { text("通知", "Notifications") }
     public static var enableNotifications: String {
         text("启用 CoPing 通知", "Enable CoPing notifications")
     }
@@ -406,12 +402,8 @@ public enum AppText {
             english: "CoPing temporarily cannot tell whether Codex will handle an approval, so all approvals will be notified."
         )
     }
-    public static var startupSection: String { text("启动", "Startup") }
     public static var launchAtLogin: String {
         text("登录 Mac 时自动启动", "Launch automatically when you log in")
-    }
-    public static var versionScopeSection: String {
-        text("版本范围", "Version scope")
     }
     public static var supportedEventsLabel: String {
         text("支持事件", "Supported events")
@@ -551,7 +543,6 @@ public enum AppText {
             "The downloaded file failed verification and was not saved."
         )
     }
-    public static var serviceSection: String { text("服务", "Service") }
     public static var httpsServerAddress: String {
         text("HTTPS 服务地址", "HTTPS server address")
     }
@@ -561,7 +552,6 @@ public enum AppText {
             "The default is https://api.day.app. Self-hosted servers must also use HTTPS."
         )
     }
-    public static var deviceSection: String { text("设备", "Device") }
     public static var deviceKeyOrURL: String {
         text("Bark 推送地址", "Bark push URL")
     }
@@ -617,7 +607,6 @@ public enum AppText {
     public static var saveAndSendTest: String {
         text("保存并发送测试通知", "Save and send test notification")
     }
-    public static var detectionSection: String { text("检测", "Detection") }
     public static var detected: String { text("已检测到", "Detected") }
     public static var notDetected: String { text("未检测到", "Not detected") }
     public static var connectionStatusLabel: String {

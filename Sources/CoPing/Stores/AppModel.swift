@@ -144,9 +144,6 @@ final class AppModel: ObservableObject {
         !deviceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (try? validatedBaseURL()) != nil
     }
-    var hasNtfyConfiguration: Bool {
-        ntfySettings.hasCurrentConfiguration
-    }
     var ntfyTopic: String { ntfySettings.topic }
     var ntfyEnabled: Bool { ntfySettings.isEnabled }
     var approvalStateStatusText: String {
@@ -471,10 +468,6 @@ final class AppModel: ObservableObject {
             approvalLogger.info(
                 "Permission request session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) mode=\(self.approvalNotificationMode.rawValue, privacy: .public)"
             )
-            let preferences = CodexNotificationPreferences(
-                approvalNotificationMode: approvalNotificationMode
-            )
-            guard preferences.allows(event.type) else { return }
             switch approvalNotificationMode {
             case .all:
                 scheduleIntervention(event)

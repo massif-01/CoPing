@@ -1,3 +1,4 @@
+import CoPingIPC
 import Foundation
 
 public enum PushChannel: String, Codable, CaseIterable, Equatable, Sendable {

@@ -34,11 +34,6 @@ public struct DeviceKeyStore {
         )
     }
 
-    public func delete() throws {
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try fileManager.removeItem(at: fileURL)
-        }
-    }
 }
 
 private struct StoredConfiguration: Codable {

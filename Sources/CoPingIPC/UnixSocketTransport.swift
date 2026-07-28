@@ -27,7 +27,7 @@ public final class UnixSocketServer: @unchecked Sendable {
     private var source: DispatchSourceRead?
 
     public init(
-        path: String = CoPingPaths.socketPath(),
+        path: String = defaultSocketPath(),
         queue: DispatchQueue = DispatchQueue(label: "com.coping.socket"),
         eventIDProvider: @escaping @Sendable () -> String = { UUID().uuidString },
         handler: @escaping EventHandler
@@ -119,7 +119,7 @@ public final class UnixSocketServer: @unchecked Sendable {
 public enum UnixSocketClient {
     public static func send(
         _ event: CodexEvent,
-        path: String = CoPingPaths.socketPath()
+        path: String = defaultSocketPath()
     ) throws {
         let socketFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFD >= 0 else { throw UnixSocketError.createFailed(errno) }
@@ -151,6 +151,11 @@ public enum UnixSocketClient {
             }
         }
     }
+}
+
+@usableFromInline
+internal func defaultSocketPath(userID: uid_t = getuid()) -> String {
+    "/tmp/coping-\(userID).sock"
 }
 
 private func makeAddress(path: String) throws -> sockaddr_un {

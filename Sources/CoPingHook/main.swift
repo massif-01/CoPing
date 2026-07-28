@@ -1,4 +1,4 @@
-import CoPingCore
+import CoPingIPC
 import Foundation
 
 private func run() {

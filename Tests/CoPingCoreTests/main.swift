@@ -101,58 +101,7 @@ private func testPayloadSanitizer() throws {
     }
 }
 
-private func testCodexNotificationPreferences() throws {
-    let defaultPreferences = CodexNotificationPreferences()
-    try check(
-        defaultPreferences.allows(.permissionRequested),
-        "Permission notifications were ignored by default"
-    )
-
-    let actionNeeded = CodexNotificationPreferences(
-        approvalNotificationMode: .actionNeeded
-    )
-    try check(
-        !actionNeeded.allows(
-            .permissionRequested,
-            approvalRequirement: .handledAutomatically
-        ),
-        "Automatically handled approval was not suppressed"
-    )
-    try check(
-        actionNeeded.allows(
-            .permissionRequested,
-            approvalRequirement: .requiresUserAction
-        ),
-        "User-action approval was suppressed"
-    )
-    try check(
-        actionNeeded.allows(
-            .permissionRequested,
-            approvalRequirement: .unknown
-        ),
-        "Unknown approval state did not fail open"
-    )
-
-    let ignoringPermissions = CodexNotificationPreferences(
-        approvalNotificationMode: .none
-    )
-    try check(
-        !ignoringPermissions.allows(.permissionRequested),
-        "Permission notifications were not ignored"
-    )
-    try check(
-        ignoringPermissions.allows(.completed),
-        "Completion notifications were affected"
-    )
-    try check(
-        ignoringPermissions.allows(.questionRequested),
-        "Question notifications were affected"
-    )
-    try check(
-        ignoringPermissions.allows(.sessionStarted),
-        "Connection events were affected"
-    )
-
+private func testApprovalNotificationMode() throws {
     try check(
         ApprovalNotificationMode.migrated(
             storedRawValue: ApprovalNotificationMode.actionNeeded.rawValue,
@@ -181,13 +130,6 @@ private func testCodexNotificationPreferences() throws {
         ) == .all,
         "Unknown stored preference did not fail open to all"
     )
-
-    for mode in ApprovalNotificationMode.allCases {
-        let preferences = CodexNotificationPreferences(approvalNotificationMode: mode)
-        try check(preferences.allows(.completed), "Completion was affected by \(mode)")
-        try check(preferences.allows(.questionRequested), "Question was affected by \(mode)")
-        try check(preferences.allows(.sessionStarted), "Connection was affected by \(mode)")
-    }
 
     try check(
         AppText.approvalNotificationModeLabel(.all, language: .simplifiedChinese)
@@ -927,7 +869,8 @@ private func testHookConfiguration() throws {
     try JSONSerialization.data(withJSONObject: original).write(to: hooksURL)
     let manager = HookConfigurationManager(hooksURL: hooksURL, helperURL: helperURL)
     _ = try manager.installConfiguration()
-    _ = try manager.installConfiguration()
+    let redundantBackup = try manager.installConfiguration()
+    try check(redundantBackup == nil, "Idempotent install created a redundant backup")
     try check(manager.isInstalled(), "Installed hooks were not detected")
 
     var root = try castRoot(Data(contentsOf: hooksURL))
@@ -1023,10 +966,6 @@ private func testDeviceKeyAndHistory() throws {
     let attributes = try FileManager.default.attributesOfItem(atPath: configurationURL.path)
     let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
     try check(permissions == 0o600, "Device Key file permissions were not 0600")
-
-    try deviceKeyStore.delete()
-    let deletedKey = try deviceKeyStore.read()
-    try check(deletedKey == nil, "Device Key file was not deleted")
 
     let malformedConfiguration = Data("{broken".utf8)
     try malformedConfiguration.write(to: configurationURL, options: [.atomic])
@@ -2505,7 +2444,7 @@ private struct CoPingSelfTests {
     static func main() async {
         do {
             try testPayloadSanitizer()
-            try testCodexNotificationPreferences()
+            try testApprovalNotificationMode()
             try testCodexApprovalStateDecoder()
             try testCodexApprovalCorrelation()
             try testCodexApprovalNotificationCoordinator()

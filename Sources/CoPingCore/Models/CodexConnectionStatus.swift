@@ -1,3 +1,4 @@
+import CoPingIPC
 import Foundation
 
 public enum CodexConnectionStatus: Equatable, Sendable {
