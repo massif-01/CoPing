@@ -4,143 +4,109 @@
 
 <p align="center"><a href="README.md">中文</a> · English</p>
 
-A macOS menu bar app. When Codex finishes a task — or gets stuck waiting on you — it pushes a notification to your phone through Bark, NTFY, or both at once.
+CoPing is a macOS menu bar app. Let Codex run on your Mac while you go do something else — when a task finishes, needs an answer, or needs your approval, CoPing pushes a notification straight to your phone (supports Bark and ntfy, and you can enable both).
 
-## Why I built this
+## What you'll be notified about
 
-The idea is simple: hand off a task to Codex, go do something else. In practice, I kept drifting back to my Mac anyway, just to check. Is it done? Is it waiting on a permission? I never knew.
+- **Task complete:** Codex finished — you'll know right away.
+- **Waiting for an answer:** Codex has a question and needs your reply.
+- **Waiting for approval:** Choose how you want to be notified.
 
-CoPing kills that loop.
+Approval notifications have three options:
 
-## What it does
-
-| Event | What happens |
+| Option | When to use |
 | --- | --- |
-| Task complete | Push immediately |
-| Permission request | Wait 5s, push if it's still running |
-| Question from Codex | Wait 5s, push if it's still running |
+| **All** | Notify me for every approval request |
+| **Action Needed** | Only notify me when I must act (recommended) |
+| **None** | I don't need approval notifications |
 
-The 5-second wait gives Codex a chance to sort things out on its own — it often does, and you don't need to know about it.
+**"Action Needed" is recommended.** Approvals Codex can handle on its own won't bother you — you'll only hear from CoPing when Codex is clearly waiting on you. When CoPing can't tell for certain, it errs on the side of notifying you so nothing slips through.
 
-Also in this version: official Bark server or self-hosted HTTPS; account-free delivery through the official `ntfy.sh`; independent Bark and NTFY switches with concurrent delivery; mute permission-request notifications individually; per-channel results for the last 100 events; manually check and download updates; launch at login; follows system language, with a manual override for Simplified Chinese or English.
+> Task-complete and question notifications are not affected by this setting.
+>
+> CoPing sends notifications. It does not currently let you approve or reply to Codex from your phone.
 
-What it doesn't do: approve actions from your phone, reply to Codex, or remote-control anything. Failure notifications aren't in yet either.
+## What you need
 
-## How it works
+- macOS 14 or later
+- The Codex desktop app
+- [Bark](https://github.com/Finb/Bark) or [ntfy](https://ntfy.sh/) on your phone — both are free apps available on the App Store (pick one or use both)
 
-```mermaid
-flowchart LR
-    A["Codex Hooks"] --> B["CoPingHook"]
-    B --> C["Strip event content"]
-    C --> D["Local Unix Socket"]
-    D --> E["CoPing menu bar app"]
-    E --> F["Bark HTTPS API"]
-    E --> H["ntfy.sh JSON API"]
-    F --> G["iPhone"]
-    H --> I["iPhone / Android"]
-```
+### Install CoPing
 
-When Codex fires a hook, a lightweight helper strips out the prompt, replies, commands, and full file paths — keeping only the event type, session ID, and project name — then hands it to CoPing over a local Unix socket.
+Download the latest `CoPing-macOS-arm64.dmg` from [GitHub Releases](https://github.com/massif-01/CoPing/releases), open it, and drag `CoPing.app` into your Applications folder.
 
-To show a human-readable task name in the notification (rather than a raw session ID), CoPing does a single read-only lookup against the local Codex state database. That's the only time the database is touched; task state always comes from the hooks themselves.
-
-Notifications go directly from your Mac to your Bark server or the official `ntfy.sh`; when both channels are enabled, CoPing sends to them concurrently. CoPing has no relay server.
-
-## Getting started
-
-**You'll need:** macOS 14+, Codex desktop app, and either [Bark](https://github.com/Finb/Bark) or the [ntfy](https://ntfy.sh/) app on your phone.
-
-### Install
-
-Grab the latest `CoPing-macOS-arm64.dmg` from [GitHub Releases](https://github.com/massif-01/CoPing/releases), open it, and drag `CoPing.app` to Applications.
-
-### macOS won't let it open
-
-I haven't joined the Apple Developer Program yet, so this build isn't notarized. macOS may block it with "cannot verify the developer" or "app is damaged."
-
-Make sure the download came from this repo's Releases page, then run:
+**macOS blocking the app?** If you see "cannot verify the developer" or "app is damaged," first confirm the download came from this repository, then run:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/CoPing.app
 open /Applications/CoPing.app
 ```
 
-This just removes the quarantine flag macOS puts on downloaded files — it doesn't change any system security settings. Never do this for apps from sources you don't trust.
+> Only run these commands for an app from a source you trust.
+
+## Set up phone notifications
+
+Bark and ntfy are free App Store apps for receiving push notifications. You can use just one or enable both — if one channel has a hiccup, the other still delivers.
 
 ### Set up Bark
 
-Open Bark on your iPhone, copy your Device Key, and paste it into CoPing's settings. The default server URL (`https://api.day.app`) works fine for the official service; swap it out if you're self-hosting. Hit "Save and send test notification," and you're done when your phone buzzes.
+1. Open Bark on your iPhone and copy your Device Key.
+2. In CoPing, open Settings → Bark and paste it in.
+3. Click "Save and send test notification" — once your phone receives it, enable Bark.
 
-On Bark's home screen, find the sample URL card and tap the circled copy button to copy your Device Key:
+On Bark's home screen, tap the marked button on the sample URL card to copy your Device Key:
 
 <p align="center">
   <img src="assets/readme/copy-bark-device-key.png" width="640" alt="Where to copy the Device Key on Bark's home screen">
 </p>
 
-### Set up NTFY
+The default address works with the official Bark service. If you run your own Bark server, swap it with your HTTPS address.
 
-NTFY connects only to the official `https://ntfy.sh`. You do not need an account or your own server, public IP address, or domain.
+### Set up ntfy
 
-1. Open Settings → NTFY and copy the strong random topic generated by CoPing.
-2. Add a subscription in the ntfy phone app. Keep the default `https://ntfy.sh` service and paste that topic.
-3. Return to CoPing and click “Save and send test notification.” Once it arrives, turn on “Enable NTFY.”
+ntfy uses the official `ntfy.sh` service — no account, no server, nothing extra to set up.
 
-Treat the topic like a notification password and do not publish or enter one manually. When you generate a new topic, CoPing first disables NTFY; subscribe to the new topic on your phone, save it, confirm the test, and then re-enable NTFY. Task-complete messages use ntfy priority 3; permission requests and questions use priority 4.
+1. In CoPing, open Settings → ntfy and copy the auto-generated Topic.
+2. Open ntfy on your phone and tap Add subscription.
+3. Paste the Topic into **Topic name**.
 
-Bark and NTFY do not replace each other. When both pages are enabled, formal Codex events go to both channels. Each page's test button sends only through that channel.
+<p align="center">
+  <img src="assets/readme/ntfy-add-subscription.jpg" width="560" alt="Paste the Topic on ntfy's Add subscription screen">
+</p>
 
-### Connect Codex
+4. Back in CoPing, click "Save and send test notification."
+5. Once it arrives on your phone, turn on "Enable NTFY."
 
-Go to Settings → Codex and click "Connect Codex." A terminal window will open — type `/hooks`, verify the `CoPingHook` path looks right, trust all CoPing hooks, and close the terminal. Start a new conversation in Codex; once CoPing receives a supported Hook event, the status will switch to Connected.
+Your Topic acts like a password for this notification channel — don't share it publicly. If you generate a new Topic, update the subscription on your phone too.
 
-CoPing merges its entries into `~/.codex/hooks.json` without touching your other hooks, and keeps a timestamped backup. Disconnecting only removes the lines it added.
+## Connect Codex
+
+1. In CoPing, open Settings → Codex and click "Connect Codex."
+2. CoPing opens a terminal window. At the prompt, type `/hooks` and press Return.
+3. Find `CoPingHook` in the list and select "Trust all."
+4. Type `/quit` and close the terminal — you're done.
+
+You don't need to install the Codex CLI separately. Conversations that were already open before connecting may not pick up the hooks right away; starting a new Codex task will sort it out.
 
 ## Privacy
 
-CoPing has no account and no relay server. When you use NTFY, notifications go directly to the official `ntfy.sh`.
+- No account required. CoPing has no relay server of its own.
+- Your prompts, replies, commands, and full file paths are never sent through CoPing's notification channels.
+- Notifications may include the task title and project name so you can tell tasks apart.
+- "Action Needed" checks locally whether Codex is waiting for you — no conversation content is saved or uploaded.
+- When you use Bark or ntfy, that service receives the final text shown on your phone.
+- Local history stores only the notification type, project name, time, and delivery result.
 
-Events get scrubbed by the helper before they ever reach the app — prompts, replies, commands, and full paths don't make it through. Notifications may include the task title and project name — that's what makes them useful. Local records store only the event type, project name, timestamp, and delivery result — no conversation content.
+Keep your Bark Device Key and ntfy Topic private.
 
-The Bark Device Key lives in `~/Library/Application Support/CoPing/config.json`; the NTFY topic is kept separately in `ntfy.json` in the same directory. Both files use `0600` permissions and the directory uses `0700`. Neither secret appears in request URLs or error logs. NTFY publishes JSON to the service root, so the topic stays out of the URL.
+## Other features
 
-The NTFY topic is generated with cryptographically secure randomness, but anyone who learns it can still subscribe or publish. Treat it like a password. Other processes running as the same macOS user can technically read these local configuration files.
-
-When NTFY is enabled, the official `ntfy.sh` receives notification titles and bodies and may cache messages under its service policy. CoPing does not send prompts, replies, commands, or full paths.
-
-## Roadmap
-
-### v0.1.2 — connection verification, Bark notifications, and manual updates ✓
-
-- [x] Task complete / permission request / question notifications
-- [x] Bark official server and self-hosted
-- [x] Local push history
-- [x] Manually check and download GitHub Release updates
-- [x] Launch at login
-- [x] Simplified Chinese and English
-
-### v0.1.3 — Bark + NTFY ✓
-
-- [x] Official `ntfy.sh` only, with no account or self-hosted service
-- [x] Generate and separately protect a strong random topic
-- [x] Priority 3 for task completion; priority 4 for permission requests and questions
-- [x] Enable Bark and NTFY independently and deliver concurrently
-- [x] Keep one history record per event with each channel's result
-
-### Down the road
-
-- [ ] More reliable failure notifications
-- [ ] Approve or reply to Codex from your phone
-
-## Build from source
-
-```bash
-./script/test.sh
-./script/build_and_run.sh --verify
-```
-
-Swift + SwiftUI. No Electron, no Python, no Node.js.
-
-Release archives must be built from a commit tagged `vMAJOR.MINOR.PATCH` (for example, `v0.1.3`). The packaging scripts inject that tag into the app bundle automatically, so the menu and Version page never need manual version edits.
+- Independent Bark and ntfy switches — use one or both at the same time
+- Delivery history for the latest 100 notifications, per channel
+- Launch at login
+- Simplified Chinese and English
+- Check for and download updates from inside the app
 
 ## License
 

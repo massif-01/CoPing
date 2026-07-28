@@ -4,143 +4,109 @@
 
 <p align="center">中文 · <a href="README.en.md">English</a></p>
 
-macOS 菜单栏小工具。Codex 跑完，或者卡在那儿等你拍板时，就通过 Bark、NTFY 或两个通道同时把通知推到手机上。
+CoPing 是一个 macOS 菜单栏小工具。让 Codex 在 Mac 上跑着，你去忙别的——任务完成、有问题要回答、或者需要你来审批时，CoPing 会直接推送到手机（支持 Bark 和 ntfy，可以同时开）。
 
-## 为什么做这个
+## 会收到哪些通知
 
-把任务扔给 Codex，自己去忙别的——听起来挺美，实际上过一会儿还是忍不住回来瞅一眼，不然不放心。不知道跑完没，有没有在等我批权限。
+- **任务完成**：Codex 做完了，马上告诉你。
+- **有问题等你回**：Codex 需要你回复时提醒。
+- **等待审批**：可以按自己的习惯选提醒方式。
 
-来回几次之后，索性做了这个工具。
+审批通知可以按需调整，有三档：
 
-## 现在能做什么
-
-| 事件 | 处理方式 |
+| 选项 | 什么时候用 |
 | --- | --- |
-| 任务完成 | 立即推送 |
-| 权限请求 | 等 5 秒，还没完就推 |
-| 普通问题 | 等 5 秒，还没完就推 |
+| **全部提醒** | 每次审批请求都通知我 |
+| **仅人工介入** | 只在必须我来操作时通知（推荐） |
+| **全部忽略** | 不想收审批通知 |
 
-等 5 秒是给 Codex 留点儿反应时间——它有时候自己就把问题解掉了，没必要专程叫你回来。
+**推荐"仅人工介入"**：Codex 自己能处理的审批不会打扰你，只有它明确在等你操作时才响。CoPing 偶尔没法判断时，宁可多发一条，避免漏掉重要请求。
 
-其他：Bark 官方或自建 HTTPS 服务；无需账号的官方 `ntfy.sh`；Bark 与 NTFY 独立启停、并发发送；单独屏蔽权限请求；查最近 100 个事件的分通道发送结果；手动检查并下载 GitHub Release 更新；开机自启；跟系统语言走，也能手动切简中/英文。
+> 任务完成和提问通知不受这三档影响。
+>
+> CoPing 只负责提醒，目前还不能让你直接在手机上审批或回复 Codex。
 
-手机上批准操作、回答 Codex、远程控制——这版都没做。执行失败的通知也还没加。
+## 准备工作
 
-## 原理
+- macOS 14 或更高版本
+- Codex 桌面 App
+- 手机上装好 [Bark](https://github.com/Finb/Bark) 或 [ntfy](https://ntfy.sh/) —— 两个都是可以从 App Store 免费下载的推送通知 App（二选一或都装）
 
-```mermaid
-flowchart LR
-    A["Codex Hooks"] --> B["CoPingHook"]
-    B --> C["清理事件内容"]
-    C --> D["本机 Unix Socket"]
-    D --> E["CoPing 菜单栏 App"]
-    E --> F["Bark HTTPS API"]
-    E --> H["ntfy.sh JSON API"]
-    F --> G["iPhone"]
-    H --> I["iPhone / Android"]
-```
+### 安装 CoPing
 
-Codex 触发 Hook 时，会随之启动一个轻量 Helper，先把提示词、回复、命令、完整路径这些内容剔除，只留事件类型、会话 ID 和项目名，再通过本机 Unix Socket 送入 CoPing。
+去 [GitHub Releases](https://github.com/massif-01/CoPing/releases) 下载最新的 `CoPing-macOS-arm64.dmg`，打开后把 `CoPing.app` 拖进"应用程序"文件夹就好。
 
-通知标题得让人看得懂，不能只甩一串 ID，所以 CoPing 会用会话 ID 去本机 Codex 数据库里查任务名。任务状态本身不依赖查库，以 Hooks 事件为准。
-
-通知从 Mac 直发到你的 Bark 服务或官方 `ntfy.sh`；两个通道都启用时会并发发送。CoPing 没有中转服务器。
-
-## 上手
-
-**需要：** macOS 14+、Codex 桌面端，以及手机上的 [Bark](https://github.com/Finb/Bark) 或 [ntfy](https://ntfy.sh/) App。
-
-### 安装
-
-从 [GitHub Releases](https://github.com/massif-01/CoPing/releases) 下载最新的 `CoPing-macOS-arm64.dmg`，打开后把 `CoPing.app` 拖进“应用程序”文件夹。
-
-### macOS 说打不开
-
-我还没加入 Apple Developer Program，所以这个版本没有公证，macOS 可能会拦下来说"无法验证开发者"或者"已损坏"。
-
-先确认包是从本仓库 Releases 下的，然后终端跑一下：
+**macOS 拦截怎么办？** 如果出现"无法验证开发者"或"App 已损坏"的提示，先确认安装包来自本仓库，然后在终端跑这两行：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/CoPing.app
 open /Applications/CoPing.app
 ```
 
-这只是摘掉 macOS 给下载文件贴的隔离标签，不影响系统安全设置。来源不明的 App 别这么干。
+> 只对你信任来源的 App 执行这两行命令。
+
+## 配置手机通知
+
+Bark 和 ntfy 都是 App Store 上的免费 App，用来接收推送通知。可以只用其中一个，也可以同时开——某个通道临时出问题，不影响另一个。
 
 ### 配置 Bark
 
-打开 Bark，复制 Device Key，填进 CoPing 设置里。服务地址默认是 `https://api.day.app`，自建的话换成自己的。点"保存并发送测试通知"，手机收到了就好了。
+1. 打开 iPhone 上的 Bark，复制 Device Key。
+2. 在 CoPing 里打开"设置 → Bark"，粘贴进去。
+3. 点"保存并发送测试通知"——手机收到就说明好了，启用即可。
 
-在 Bark 首页的示例 URL 卡片上，点图中标注的复制按钮，就能复制 Device Key：
+在 Bark 首页的示例 URL 卡片上，点图中标注的按钮就能复制 Device Key：
 
 <p align="center">
   <img src="assets/readme/copy-bark-device-key.png" width="640" alt="在 Bark 首页复制 Device Key 的按钮位置">
 </p>
 
-### 配置 NTFY
+默认地址对应 Bark 官方服务。如果你自建了 Bark 服务，换成自己的 HTTPS 地址就行。
 
-NTFY 只连接官方 `https://ntfy.sh`，不需要账号，也不需要自备服务器、公网 IP 或域名。
+### 配置 ntfy
 
-1. 进入“设置 → NTFY”，复制 CoPing 自动生成的随机 Topic。
-2. 在手机 ntfy App 中新增订阅，服务使用默认的 `https://ntfy.sh`，Topic 粘贴刚才的值。
-3. 回到 CoPing，点“保存并发送测试通知”；收到后打开“启用 NTFY”。
+ntfy 走官方的 `ntfy.sh`，不用注册账号，也不用自备服务器。
 
-Topic 相当于通知密码，不要公开，也不能手动输入。点“重新生成”后，CoPing 会先关闭 NTFY；请让手机订阅新 Topic，保存并测试成功后再重新启用。任务完成使用 ntfy 优先级 3；权限请求和普通问题使用优先级 4。
+1. 在 CoPing 里打开"设置 → ntfy"，复制那个自动生成的 Topic。
+2. 打开手机上的 ntfy，点新增订阅。
+3. 把刚才复制的 Topic 粘贴到 **Topic name** 里。
 
-Bark 和 NTFY 互不替代。两个页面都启用后，正式 Codex 事件会同时发送到两个通道；Bark 和 NTFY 各自的测试按钮只测试自己的通道。
+<p align="center">
+  <img src="assets/readme/ntfy-add-subscription.jpg" width="560" alt="在 ntfy 新增订阅页面粘贴 Topic">
+</p>
 
-### 接入 Codex
+4. 回到 CoPing，点"保存并发送测试通知"。
+5. 手机收到通知后，打开"启用 NTFY"。
 
-进"设置 → Codex"，点"连接 Codex"，弹出的终端里输 `/hooks`，找到 `CoPingHook` 的路径后点信任，再关掉终端。然后在 Codex 里新建一个对话，等状态变"已连接"就行了。
+Topic 相当于这条通道的通知密码，不要公开分享。如果重新生成了 Topic，手机上的订阅也要跟着换。
 
-连接时 CoPing 把配置合并进 `~/.codex/hooks.json`，你已有的 Hooks 不动，同时留一份带时间戳的备份。断开时只删自己写进去的那几条。
+## 连接到 Codex
 
-## 隐私
+1. 在 CoPing 里打开"设置 → Codex"，点"连接 Codex"。
+2. CoPing 会打开一个终端，看到光标后输入 `/hooks` 回车。
+3. 找到列表里的 `CoPingHook`，选"信任全部"。
+4. 输入 `/quit`，关掉终端就完成了。
 
-CoPing 没有账号，也没有中转服务器。使用 NTFY 时，通知会直接发给官方 `ntfy.sh`。
+不需要另外装命令行版 Codex。连接前已经开着的旧对话可能不会立刻生效，遇到这种情况新建一个 Codex 任务就好。
 
-事件在进入 CoPing 之前就已经过滤过了——提示词、回复、命令、完整路径都不会进来。通知里可能有任务标题和项目名，方便认出是哪个任务。本地记录只存事件类型、项目名、时间和推送结果，不存对话内容。
+## 隐私说明
 
-Bark Device Key 存在 `~/Library/Application Support/CoPing/config.json`；NTFY Topic 单独存在同目录的 `ntfy.json`。两个文件权限都是 `0600`，所在目录权限为 `0700`。Device Key 和 Topic 都不会出现在请求 URL 或错误日志里；NTFY 通过 JSON 正文发布，Topic 不进入 URL。
+- 不需要账号，CoPing 没有自己的中转服务器。
+- 你的提示词、回复内容、命令、完整文件路径不会经过 CoPing 的通知通道。
+- 通知里可能带有任务标题和项目名，方便你认出是哪个任务。
+- "仅人工介入"的判断完全在本地进行，不保存也不上传对话内容。
+- 通知发出去时，Bark 或 ntfy 服务会收到最终显示在手机上的那段文字。
+- 本地历史只记录通知类型、项目名、时间和发送结果。
 
-NTFY Topic 采用密码学安全的随机值，但知道 Topic 的人仍可订阅或发布消息，请像密码一样保管。同一 macOS 用户下的其他进程技术上仍能读取这些本地配置文件。
+妥善保管你的 Bark Device Key 和 ntfy Topic。
 
-启用 NTFY 后，官方 `ntfy.sh` 会接收通知标题和正文，并可能按其服务策略缓存消息；CoPing 不会把提示词、回复、命令或完整路径发过去。
+## 其他
 
-## Roadmap
-
-### v0.1.2 — 连接确认、Bark 通知与手动更新 ✓
-
-- [x] 任务完成 / 权限请求 / 普通问题通知
-- [x] Bark 官方服务与自建服务
-- [x] 本地推送记录
-- [x] 手动检查并下载 GitHub Release 更新
-- [x] 开机自启
-- [x] 简中 / 英文
-
-### v0.1.3 — Bark + NTFY ✓
-
-- [x] 仅接入官方 `ntfy.sh`，无需账号或自建服务
-- [x] 自动生成并单独保护随机 Topic
-- [x] 任务完成优先级 3；权限请求和普通问题优先级 4
-- [x] Bark 与 NTFY 独立启停，并发投递
-- [x] 每个事件只保留一条记录，同时显示各通道结果
-
-### 以后
-
-- [ ] 执行失败通知（更可靠的版本）
-- [ ] 从手机回答或批准 Codex 请求
-
-## 从源码构建
-
-```bash
-./script/test.sh
-./script/build_and_run.sh --verify
-```
-
-Swift + SwiftUI，不依赖 Electron、Python 或 Node.js。
-
-发布包必须从 `v主版本.次版本.修订版本`（例如 `v0.1.3`）Tag 对应的提交构建。打包脚本会自动把 Tag 写入 App Bundle，菜单和版本页不需要手动修改版本号。
+- Bark 和 ntfy 独立开关，可以同时推送
+- 查看最近 100 条通知记录，包括各通道的发送结果
+- 开机自动启动
+- 支持简体中文和英文界面
+- 应用内直接检查和下载新版本
 
 ## 协议
 

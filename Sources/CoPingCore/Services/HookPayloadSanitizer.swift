@@ -37,6 +37,7 @@ public enum HookPayloadSanitizer {
             type: type,
             sessionID: sessionID,
             turnID: turnID,
+            eventID: type == .permissionRequested ? UUID().uuidString : nil,
             projectName: projectName,
             timestamp: now
         )

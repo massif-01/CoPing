@@ -44,6 +44,16 @@ public enum CoPingPaths {
         "/tmp/coping-\(userID).sock"
     }
 
+    public static func codexIPCPath(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> String {
+        homeDirectory
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("ipc", isDirectory: true)
+            .appendingPathComponent("ipc.sock", isDirectory: false)
+            .path
+    }
+
     public static func hooksFile(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {

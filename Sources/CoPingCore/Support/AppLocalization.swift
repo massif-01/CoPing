@@ -334,13 +334,76 @@ public enum AppText {
             "CoPing will still receive Codex events, but will not send them to enabled notification channels."
         )
     }
-    public static var ignorePermissionNotifications: String {
-        text("忽略审批通知", "Ignore approval notifications")
+    public static var approvalNotifications: String {
+        text("审批通知", "Approval notifications")
     }
-    public static var ignorePermissionNotificationsHelp: String {
-        text(
-            "如果你使用“替我审批”，建议开启。开启后 CoPing 不再发送任何审批通知；任务完成和提问通知不受影响。",
-            "Turn this on if you use “Review for me.” CoPing will stop all approval notifications; completion and question notifications are unaffected."
+
+    public static func approvalNotificationModeLabel(
+        _ mode: ApprovalNotificationMode,
+        language: AppLanguage = .current
+    ) -> String {
+        switch mode {
+        case .all:
+            language.text(chinese: "全部提醒", english: "All")
+        case .actionNeeded:
+            language.text(chinese: "仅人工介入", english: "Action Needed")
+        case .none:
+            language.text(chinese: "全部忽略", english: "None")
+        }
+    }
+
+    public static func approvalNotificationHelp(
+        _ mode: ApprovalNotificationMode,
+        language: AppLanguage = .current
+    ) -> String {
+        switch mode {
+        case .all:
+            language.text(
+                chinese: "每次 Codex 请求审批时都发送通知；任务完成和提问通知不受影响。",
+                english: "Notify for every Codex approval request. Completion and question notifications are unaffected."
+            )
+        case .actionNeeded:
+            language.text(
+                chinese: "忽略 Codex 能自动处理的审批；只有需要你亲自操作时才通知。未知状态仍会通知，避免漏报。此模式仅在本机读取 Codex 审批状态，不保存或上传对话内容。任务完成和提问通知不受影响。",
+                english: "Ignore approvals Codex can handle automatically and notify only when you must act. Unknown states still notify to avoid missed requests. This mode reads Codex approval state only on this Mac and does not save or upload conversation content. Completion and question notifications are unaffected."
+            )
+        case .none:
+            language.text(
+                chinese: "不发送审批通知；任务完成和提问通知不受影响。",
+                english: "Do not send approval notifications. Completion and question notifications are unaffected."
+            )
+        }
+    }
+    public static func approvalStateConnectToUse(
+        language: AppLanguage = .current
+    ) -> String {
+        language.text(
+            chinese: "连接 Codex 后，“仅人工介入”才会生效。",
+            english: "Connect Codex to use Action Needed."
+        )
+    }
+    public static func approvalStateChecking(
+        language: AppLanguage = .current
+    ) -> String {
+        language.text(
+            chinese: "正在确认 Codex 的审批状态；暂时无法判断时仍会提醒。",
+            english: "Checking Codex approval status. CoPing will still notify when it cannot determine the state."
+        )
+    }
+    public static func approvalStateReady(
+        language: AppLanguage = .current
+    ) -> String {
+        language.text(
+            chinese: "已能识别哪些审批需要你亲自操作。",
+            english: "CoPing can identify approvals that require you to act."
+        )
+    }
+    public static func approvalStateUnavailable(
+        language: AppLanguage = .current
+    ) -> String {
+        language.text(
+            chinese: "暂时无法判断 Codex 是否会自动处理，当前会提醒所有审批。",
+            english: "CoPing temporarily cannot tell whether Codex will handle an approval, so all approvals will be notified."
         )
     }
     public static var startupSection: String { text("启动", "Startup") }
@@ -814,6 +877,21 @@ public enum AppText {
         return language.text(
             chinese: "Codex 需要审批",
             english: "Codex needs approval"
+        )
+    }
+    public static func manualApprovalNotificationBody(
+        taskTitle: String? = nil,
+        language: AppLanguage = .current
+    ) -> String {
+        if let taskTitle = notificationTaskTitle(taskTitle) {
+            return language.text(
+                chinese: "Codex [\(taskTitle)] 等待你审批",
+                english: "Codex [\(taskTitle)] is waiting for your approval"
+            )
+        }
+        return language.text(
+            chinese: "Codex 等待你审批",
+            english: "Codex is waiting for your approval"
         )
     }
     public static var questionNotificationTitle: String {

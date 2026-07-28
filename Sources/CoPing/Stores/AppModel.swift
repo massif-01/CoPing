@@ -3,6 +3,7 @@ import CoPingCore
 import CoPingAppSupport
 import Combine
 import Foundation
+import OSLog
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -13,10 +14,11 @@ final class AppModel: ObservableObject {
     @Published var barkEnabled: Bool
     @Published private var ntfySettings: NtfySettingsCoordinator
     @Published var notificationsEnabled: Bool
-    @Published var ignorePermissionNotifications: Bool
+    @Published var approvalNotificationMode: ApprovalNotificationMode
     @Published var launchAtLogin: Bool
     @Published var languagePreference: AppLanguagePreference
     @Published var connectionStatus: CodexConnectionStatus
+    @Published var approvalStateHealth: CodexApprovalMonitorHealth = .stopped
     @Published var notice: Notice?
     @Published var records: [DeliveryRecord]
     @Published var isBusy = false
@@ -35,12 +37,21 @@ final class AppModel: ObservableObject {
     private let hookManager = HookConfigurationManager()
     private let loginManager = LoginItemManager()
     private let taskTitleResolver = CodexTaskTitleResolver()
+    private let approvalLogger = Logger(
+        subsystem: "com.coping.app",
+        category: "ApprovalNotifications"
+    )
     private struct PendingIntervention {
-        let eventType: CodexEvent.EventType
-        let task: Task<Void, Never>
+        let event: CodexEvent
+        var task: Task<Void, Never>?
     }
 
+    private var approvalStateMonitor: CodexApprovalStateMonitor?
+    private var approvalCoordinator = CodexApprovalNotificationCoordinator()
+    private var approvalFallbackTasks: [String: Task<Void, Never>] = [:]
+    private var approvalDeliveryTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingInterventions: [String: PendingIntervention] = [:]
+    private var codexEventProcessingSuspended = true
     private var seenEventKeys: [String] = []
     private var seenEventSet: Set<String> = []
 
@@ -69,18 +80,25 @@ final class AppModel: ObservableObject {
             defaults.object(forKey: "barkEnabled") as? Bool
             ?? !loadedDeviceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
-        ignorePermissionNotifications =
-            defaults.object(forKey: "ignorePermissionNotifications") as? Bool ?? false
+        let loadedApprovalNotificationMode = ApprovalNotificationMode.migrated(
+            storedRawValue: defaults.string(forKey: "approvalNotificationMode"),
+            legacyIgnorePermissionNotifications:
+                defaults.object(forKey: "ignorePermissionNotifications") as? Bool
+        )
+        approvalNotificationMode = loadedApprovalNotificationMode
         launchAtLogin = defaults.object(forKey: "launchAtLogin") as? Bool ?? true
         languagePreference = AppLanguagePreference.current
         records = historyStore.load()
+        defaults.set(loadedApprovalNotificationMode.rawValue, forKey: "approvalNotificationMode")
 
         if hookManager.isInstalled() {
             connectionStatus = defaults.bool(forKey: "codexConnectionVerified")
                 ? .connected
                 : .awaitingVerification
+            codexEventProcessingSuspended = false
         } else {
             connectionStatus = .disconnected
+            codexEventProcessingSuspended = true
         }
 
         if startServices {
@@ -104,9 +122,20 @@ final class AppModel: ObservableObject {
         } else if ntfySettings.configurationReadFailed {
             showNotice(AppText.ntfyConfigurationReadFailed, kind: .error)
         }
+
+        if
+            startServices,
+            approvalNotificationMode == .actionNeeded,
+            !codexEventProcessingSuspended
+        {
+            startApprovalStateMonitor()
+        }
     }
 
     deinit {
+        approvalStateMonitor?.stop()
+        approvalFallbackTasks.values.forEach { $0.cancel() }
+        approvalDeliveryTasks.values.forEach { $0.cancel() }
         ntfySession.invalidateAndCancel()
     }
 
@@ -120,6 +149,19 @@ final class AppModel: ObservableObject {
     }
     var ntfyTopic: String { ntfySettings.topic }
     var ntfyEnabled: Bool { ntfySettings.isEnabled }
+    var approvalStateStatusText: String {
+        if codexEventProcessingSuspended {
+            return AppText.approvalStateConnectToUse()
+        }
+        switch approvalStateHealth {
+        case .stopped, .connecting:
+            return AppText.approvalStateChecking()
+        case .ready:
+            return AppText.approvalStateReady()
+        case .unavailable, .unsupportedProtocol:
+            return AppText.approvalStateUnavailable()
+        }
+    }
 
     var menuStatusText: String {
         if !notificationsEnabled { return AppText.notificationsPaused }
@@ -275,8 +317,12 @@ final class AppModel: ObservableObject {
         do {
             try helperInstaller.install()
             _ = try hookManager.installConfiguration()
+            codexEventProcessingSuspended = false
             defaults.set(false, forKey: "codexConnectionVerified")
             connectionStatus = .awaitingVerification
+            if approvalNotificationMode == .actionNeeded {
+                startApprovalStateMonitor()
+            }
             do {
                 try HookTrustLauncher().openReviewTerminal()
                 showNotice(AppText.trustHooksStatus, kind: .information)
@@ -300,6 +346,8 @@ final class AppModel: ObservableObject {
     }
 
     func disconnectCodex() {
+        codexEventProcessingSuspended = true
+        cancelCodexNotificationProcessing()
         do {
             try hookManager.uninstallConfiguration()
             try helperInstaller.uninstall()
@@ -317,16 +365,44 @@ final class AppModel: ObservableObject {
         defaults.set(enabled, forKey: "notificationsEnabled")
     }
 
-    func setIgnorePermissionNotifications(_ ignored: Bool) {
-        ignorePermissionNotifications = ignored
-        defaults.set(ignored, forKey: "ignorePermissionNotifications")
+    func setApprovalNotificationMode(_ mode: ApprovalNotificationMode) {
+        guard approvalNotificationMode != mode else { return }
+        let approvalEvents = approvalCoordinator.pendingEvents
+        approvalNotificationMode = mode
+        defaults.set(mode.rawValue, forKey: "approvalNotificationMode")
+        defaults.set(mode == .none, forKey: "ignorePermissionNotifications")
 
-        guard ignored else { return }
         let pendingPermissionKeys = pendingInterventions.compactMap { key, pending in
-            pending.eventType == .permissionRequested ? key : nil
+            pending.event.type == .permissionRequested ? key : nil
         }
-        for key in pendingPermissionKeys {
-            pendingInterventions.removeValue(forKey: key)?.task.cancel()
+
+        switch mode {
+        case .all:
+            cancelApprovalDeliveries()
+            applyApprovalEffects(approvalCoordinator.reset())
+            stopApprovalStateMonitor()
+            for event in approvalEvents {
+                scheduleIntervention(event, delay: .milliseconds(100))
+            }
+            for key in pendingPermissionKeys {
+                armPendingIntervention(key, delay: .milliseconds(100))
+            }
+        case .actionNeeded:
+            if !codexEventProcessingSuspended {
+                startApprovalStateMonitor()
+            }
+            for key in pendingPermissionKeys {
+                guard let pending = pendingInterventions[key] else { continue }
+                cancelPendingIntervention(key)
+                applyApprovalEffects(approvalCoordinator.receive(pending.event))
+            }
+        case .none:
+            cancelApprovalDeliveries()
+            applyApprovalEffects(approvalCoordinator.reset())
+            stopApprovalStateMonitor()
+            for key in pendingPermissionKeys {
+                cancelPendingIntervention(key)
+            }
         }
     }
 
@@ -359,7 +435,9 @@ final class AppModel: ObservableObject {
     }
 
     private func receive(_ event: CodexEvent) {
-        guard event.verifiesConnection else { return }
+        guard !codexEventProcessingSuspended, event.verifiesConnection else {
+            return
+        }
 
         if connectionStatus.verify(with: event) {
             defaults.set(true, forKey: "codexConnectionVerified")
@@ -372,7 +450,13 @@ final class AppModel: ObservableObject {
         case .sessionStarted:
             break
         case .completed:
-            pendingInterventions.removeValue(forKey: event.turnKey)?.task.cancel()
+            cancelPendingInterventions(turnKey: event.turnKey)
+            applyApprovalEffects(
+                approvalCoordinator.complete(
+                    sessionID: event.sessionID,
+                    turnID: event.turnID
+                )
+            )
             let taskTitle = taskTitleResolver.title(for: event.sessionID)
             Task {
                 await deliver(
@@ -384,52 +468,252 @@ final class AppModel: ObservableObject {
                 )
             }
         case .permissionRequested:
+            approvalLogger.info(
+                "Permission request session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) mode=\(self.approvalNotificationMode.rawValue, privacy: .public)"
+            )
             let preferences = CodexNotificationPreferences(
-                ignorePermissionNotifications: ignorePermissionNotifications
+                approvalNotificationMode: approvalNotificationMode
             )
             guard preferences.allows(event.type) else { return }
-            scheduleIntervention(event)
+            switch approvalNotificationMode {
+            case .all:
+                scheduleIntervention(event)
+            case .actionNeeded:
+                startApprovalStateMonitor()
+                applyApprovalEffects(approvalCoordinator.receive(event))
+            case .none:
+                break
+            }
         case .questionRequested:
             scheduleIntervention(event)
         }
     }
 
-    private func scheduleIntervention(_ event: CodexEvent) {
-        guard pendingInterventions[event.turnKey] == nil else { return }
+    private func scheduleIntervention(
+        _ event: CodexEvent,
+        delay: Duration = .seconds(5)
+    ) {
+        let key = event.uniqueKey
+        guard pendingInterventions[key] == nil else { return }
+        pendingInterventions[key] = PendingIntervention(
+            event: event,
+            task: nil
+        )
+        armPendingIntervention(key, delay: delay)
+    }
+
+    private func armPendingIntervention(_ key: String, delay: Duration) {
+        guard var pending = pendingInterventions[key] else { return }
+        pending.task?.cancel()
         let task = Task { [weak self] in
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
+            }
+            await self?.deliverPendingIntervention(key)
+        }
+        pending.task = task
+        pendingInterventions[key] = pending
+    }
+
+    private func deliverPendingIntervention(_ key: String) async {
+        guard let pending = pendingInterventions.removeValue(forKey: key) else { return }
+
+        let event = pending.event
+        let title: String
+        let body: String
+        let taskTitle = taskTitleResolver.title(for: event.sessionID)
+        switch event.type {
+        case .permissionRequested:
+            guard approvalNotificationMode == .all else { return }
+            approvalLogger.info(
+                "Delivering permission notification session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) mode=\(self.approvalNotificationMode.rawValue, privacy: .public)"
+            )
+            title = AppText.permissionNotificationTitle
+            body = AppText.permissionNotificationBody(taskTitle: taskTitle)
+        case .questionRequested:
+            title = AppText.questionNotificationTitle
+            body = AppText.questionNotificationBody(taskTitle: taskTitle)
+        default:
+            return
+        }
+
+        await deliver(
+            PushNotification(
+                title: title,
+                body: body,
+                urgency: .high
+            ),
+            for: event
+        )
+    }
+
+    private func cancelPendingIntervention(_ key: String) {
+        pendingInterventions.removeValue(forKey: key)?.task?.cancel()
+    }
+
+    private func cancelPendingInterventions(turnKey: String) {
+        let keys = pendingInterventions.compactMap { key, pending in
+            pending.event.turnKey == turnKey ? key : nil
+        }
+        for key in keys {
+            cancelPendingIntervention(key)
+        }
+    }
+
+    private func startApprovalStateMonitor() {
+        guard
+            approvalNotificationMode == .actionNeeded,
+            !codexEventProcessingSuspended
+        else {
+            return
+        }
+        if approvalStateMonitor == nil {
+            approvalStateMonitor = CodexApprovalStateMonitor(
+                healthHandler: { [weak self] health in
+                    Task { @MainActor in
+                        self?.receiveApprovalStateHealth(health)
+                    }
+                },
+                observationHandler: { [weak self] observations in
+                    Task { @MainActor in
+                        self?.receiveApprovalObservations(observations)
+                    }
+                }
+            )
+        }
+        approvalStateMonitor?.start()
+    }
+
+    private func stopApprovalStateMonitor() {
+        approvalStateHealth = .stopped
+        approvalStateMonitor?.stop()
+        approvalStateMonitor = nil
+    }
+
+    private func receiveApprovalObservations(
+        _ observations: [CodexApprovalObservation]
+    ) {
+        guard
+            approvalNotificationMode == .actionNeeded,
+            !codexEventProcessingSuspended
+        else {
+            return
+        }
+
+        for observation in observations {
+            applyApprovalEffects(approvalCoordinator.receive(observation))
+        }
+    }
+
+    private func receiveApprovalStateHealth(
+        _ health: CodexApprovalMonitorHealth
+    ) {
+        guard
+            approvalNotificationMode == .actionNeeded,
+            !codexEventProcessingSuspended
+        else {
+            return
+        }
+        approvalStateHealth = health
+        applyApprovalEffects(approvalCoordinator.monitorHealthChanged(health))
+    }
+
+    private func applyApprovalEffects(
+        _ effects: [CodexApprovalCoordinatorEffect]
+    ) {
+        for effect in effects {
+            switch effect {
+            case let .scheduleUnknownFallback(key):
+                scheduleApprovalFallback(key: key)
+            case let .cancelUnknownFallback(key):
+                approvalFallbackTasks.removeValue(forKey: key)?.cancel()
+            case let .notify(event, cause):
+                beginApprovalDelivery(event: event, cause: cause)
+            case let .followSession(sessionID):
+                approvalStateMonitor?.follow(sessionID: sessionID)
+            case let .unfollowSession(sessionID):
+                approvalStateMonitor?.unfollow(sessionID: sessionID)
+            }
+        }
+    }
+
+    private func scheduleApprovalFallback(key: String) {
+        guard approvalFallbackTasks[key] == nil else { return }
+        approvalFallbackTasks[key] = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(5))
             } catch {
                 return
             }
             guard let self else { return }
-            let title: String
-            let body: String
-            let taskTitle = self.taskTitleResolver.title(for: event.sessionID)
-            switch event.type {
-            case .permissionRequested:
-                title = AppText.permissionNotificationTitle
-                body = AppText.permissionNotificationBody(taskTitle: taskTitle)
-            case .questionRequested:
-                title = AppText.questionNotificationTitle
-                body = AppText.questionNotificationBody(taskTitle: taskTitle)
-            default:
+            approvalFallbackTasks.removeValue(forKey: key)
+            guard
+                approvalNotificationMode == .actionNeeded,
+                !codexEventProcessingSuspended
+            else {
                 return
             }
-            await self.deliver(
+            applyApprovalEffects(approvalCoordinator.unknownFallbackFired(key: key))
+        }
+    }
+
+    private func beginApprovalDelivery(
+        event: CodexEvent,
+        cause: CodexApprovalNotificationCause
+    ) {
+        guard
+            approvalNotificationMode == .actionNeeded,
+            !codexEventProcessingSuspended
+        else {
+            return
+        }
+        let taskID = UUID()
+        let taskTitle = taskTitleResolver.title(for: event.sessionID)
+        let body: String
+        switch cause {
+        case .requiresUserAction:
+            body = AppText.manualApprovalNotificationBody(taskTitle: taskTitle)
+        case .unknownState:
+            body = AppText.permissionNotificationBody(taskTitle: taskTitle)
+        }
+        approvalLogger.info(
+            "Delivering filtered permission notification session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) cause=\(String(describing: cause), privacy: .public)"
+        )
+        approvalDeliveryTasks[taskID] = Task { [weak self] in
+            guard let self else { return }
+            await deliver(
                 PushNotification(
-                    title: title,
+                    title: AppText.permissionNotificationTitle,
                     body: body,
                     urgency: .high
                 ),
                 for: event
             )
-            self.pendingInterventions[event.turnKey] = nil
+            approvalDeliveryTasks.removeValue(forKey: taskID)
         }
-        pendingInterventions[event.turnKey] = PendingIntervention(
-            eventType: event.type,
-            task: task
-        )
+    }
+
+    private func cancelApprovalDeliveries() {
+        for task in approvalDeliveryTasks.values {
+            task.cancel()
+        }
+        approvalDeliveryTasks.removeAll()
+    }
+
+    private func cancelCodexNotificationProcessing() {
+        for pending in pendingInterventions.values {
+            pending.task?.cancel()
+        }
+        pendingInterventions.removeAll()
+        applyApprovalEffects(approvalCoordinator.reset())
+        for task in approvalFallbackTasks.values {
+            task.cancel()
+        }
+        approvalFallbackTasks.removeAll()
+        cancelApprovalDeliveries()
+        stopApprovalStateMonitor()
     }
 
     private func deliver(_ notification: PushNotification, for event: CodexEvent) async {
@@ -502,6 +786,11 @@ final class AppModel: ObservableObject {
             attempts: attempts,
             detail: attempts.isEmpty ? AppText.noPushChannelEnabled : nil
         )
+        if event.type == .permissionRequested {
+            approvalLogger.info(
+                "Recorded permission notification session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) attempts=\(attempts.count, privacy: .public)"
+            )
+        }
         presentDeliveryResult(attempts)
     }
 

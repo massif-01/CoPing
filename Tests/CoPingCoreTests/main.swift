@@ -41,6 +41,31 @@ private func testPayloadSanitizer() throws {
     )
     let questionEvent = try HookPayloadSanitizer.sanitize(question)
     try check(questionEvent.type == .questionRequested, "request_user_input was not mapped")
+
+    let permission = Data(
+        """
+        {"hook_event_name":"PermissionRequest","session_id":"s","turn_id":"t","cwd":"/tmp/p","tool_input":{"command":"secret command"}}
+        """.utf8
+    )
+    let firstPermission = try HookPayloadSanitizer.sanitize(permission, now: Date())
+    let secondPermission = try HookPayloadSanitizer.sanitize(permission, now: Date())
+    try check(
+        firstPermission.eventID != nil
+            && firstPermission.eventID != secondPermission.eventID,
+        "Two approval requests in one turn were collapsed into one event"
+    )
+    try check(
+        firstPermission.uniqueKey != secondPermission.uniqueKey,
+        "Approval event uniqueness did not include its sanitized event ID"
+    )
+    let encodedPermission = String(
+        decoding: try JSONEncoder().encode(firstPermission),
+        as: UTF8.self
+    )
+    try check(
+        !encodedPermission.contains("secret command"),
+        "Approval event ID support leaked tool input"
+    )
     try check(
         CodexEvent.EventType.allCases.allSatisfy {
             CodexEvent(
@@ -83,8 +108,33 @@ private func testCodexNotificationPreferences() throws {
         "Permission notifications were ignored by default"
     )
 
+    let actionNeeded = CodexNotificationPreferences(
+        approvalNotificationMode: .actionNeeded
+    )
+    try check(
+        !actionNeeded.allows(
+            .permissionRequested,
+            approvalRequirement: .handledAutomatically
+        ),
+        "Automatically handled approval was not suppressed"
+    )
+    try check(
+        actionNeeded.allows(
+            .permissionRequested,
+            approvalRequirement: .requiresUserAction
+        ),
+        "User-action approval was suppressed"
+    )
+    try check(
+        actionNeeded.allows(
+            .permissionRequested,
+            approvalRequirement: .unknown
+        ),
+        "Unknown approval state did not fail open"
+    )
+
     let ignoringPermissions = CodexNotificationPreferences(
-        ignorePermissionNotifications: true
+        approvalNotificationMode: .none
     )
     try check(
         !ignoringPermissions.allows(.permissionRequested),
@@ -101,6 +151,700 @@ private func testCodexNotificationPreferences() throws {
     try check(
         ignoringPermissions.allows(.sessionStarted),
         "Connection events were affected"
+    )
+
+    try check(
+        ApprovalNotificationMode.migrated(
+            storedRawValue: ApprovalNotificationMode.actionNeeded.rawValue,
+            legacyIgnorePermissionNotifications: true
+        ) == .actionNeeded,
+        "Stored three-state preference did not take precedence over the legacy switch"
+    )
+    try check(
+        ApprovalNotificationMode.migrated(
+            storedRawValue: nil,
+            legacyIgnorePermissionNotifications: true
+        ) == .none,
+        "Legacy enabled ignore switch did not migrate to none"
+    )
+    try check(
+        ApprovalNotificationMode.migrated(
+            storedRawValue: nil,
+            legacyIgnorePermissionNotifications: false
+        ) == .all,
+        "Legacy disabled ignore switch did not migrate to all"
+    )
+    try check(
+        ApprovalNotificationMode.migrated(
+            storedRawValue: "unsupported",
+            legacyIgnorePermissionNotifications: nil
+        ) == .all,
+        "Unknown stored preference did not fail open to all"
+    )
+
+    for mode in ApprovalNotificationMode.allCases {
+        let preferences = CodexNotificationPreferences(approvalNotificationMode: mode)
+        try check(preferences.allows(.completed), "Completion was affected by \(mode)")
+        try check(preferences.allows(.questionRequested), "Question was affected by \(mode)")
+        try check(preferences.allows(.sessionStarted), "Connection was affected by \(mode)")
+    }
+
+    try check(
+        AppText.approvalNotificationModeLabel(.all, language: .simplifiedChinese)
+            == "全部提醒",
+        "Chinese all-approvals label changed"
+    )
+    try check(
+        AppText.approvalNotificationModeLabel(.actionNeeded, language: .simplifiedChinese)
+            == "仅人工介入",
+        "Chinese action-needed label changed"
+    )
+    try check(
+        AppText.approvalNotificationModeLabel(.none, language: .simplifiedChinese)
+            == "全部忽略",
+        "Chinese no-approvals label changed"
+    )
+    try check(
+        AppText.approvalNotificationModeLabel(.all, language: .english) == "All",
+        "English all-approvals label changed"
+    )
+    try check(
+        AppText.approvalNotificationModeLabel(.actionNeeded, language: .english)
+            == "Action Needed",
+        "English action-needed label changed"
+    )
+    try check(
+        AppText.approvalNotificationModeLabel(.none, language: .english) == "None",
+        "English no-approvals label changed"
+    )
+    try check(
+        AppText.approvalNotificationHelp(.actionNeeded, language: .simplifiedChinese)
+            .contains("未知状态仍会通知"),
+        "Chinese action-needed help did not disclose fail-open behavior"
+    )
+    try check(
+        AppText.approvalNotificationHelp(.actionNeeded, language: .english)
+            .contains("Unknown states still notify"),
+        "English action-needed help did not disclose fail-open behavior"
+    )
+    try check(
+        AppText.approvalNotificationHelp(.actionNeeded, language: .simplifiedChinese)
+            .contains("不保存或上传对话内容"),
+        "Chinese action-needed help did not disclose the local-only privacy boundary"
+    )
+    try check(
+        AppText.approvalNotificationHelp(.actionNeeded, language: .english)
+            .contains("does not save or upload conversation content"),
+        "English action-needed help did not disclose the local-only privacy boundary"
+    )
+    try check(
+        AppText.manualApprovalNotificationBody(
+            taskTitle: "审批测试",
+            language: .simplifiedChinese
+        ) == "Codex [审批测试] 等待你审批",
+        "Chinese manual-approval notification copy changed"
+    )
+    try check(
+        AppText.manualApprovalNotificationBody(
+            taskTitle: "Approval Test",
+            language: .english
+        ) == "Codex [Approval Test] is waiting for your approval",
+        "English manual-approval notification copy changed"
+    )
+    try check(
+        AppText.approvalStateUnavailable(language: .simplifiedChinese)
+            == "暂时无法判断 Codex 是否会自动处理，当前会提醒所有审批。",
+        "Chinese unavailable-state explanation changed"
+    )
+    try check(
+        AppText.approvalStateUnavailable(language: .english)
+            == "CoPing temporarily cannot tell whether Codex will handle an approval, so all approvals will be notified.",
+        "English unavailable-state explanation changed"
+    )
+    try check(
+        AppText.approvalStateConnectToUse(language: .simplifiedChinese)
+            .contains("连接 Codex"),
+        "Chinese disconnected guidance was missing"
+    )
+    try check(
+        AppText.approvalStateConnectToUse(language: .english)
+            .contains("Connect Codex"),
+        "English disconnected guidance was missing"
+    )
+}
+
+private func testCodexApprovalStateDecoder() throws {
+    let decoder = CodexApprovalStateDecoder()
+    let snapshot = Data(
+        """
+        {
+          "type":"broadcast",
+          "method":"thread-stream-state-changed",
+          "version":11,
+          "params":{
+            "conversationId":"session-approval",
+            "change":{
+              "type":"snapshot",
+              "conversationState":{
+                "threadRuntimeStatus":{
+                  "type":"active",
+                  "activeFlags":["waitingOnApproval"]
+                },
+                "turnHistory":{
+                  "history":{
+                    "entitiesByKey":{
+                      "entity-1":{
+                        "turnId":"turn-approval",
+                        "status":"inProgress",
+                        "turnStartedAtMs":1000000,
+                        "prompt":"private snapshot text",
+                        "hookRuns":[
+                          {
+                            "run":{
+                              "eventName":"PermissionRequest",
+                              "id":"permission-request:1:/tmp/hooks.json:call_approval",
+                              "startedAt":1000
+                            }
+                          }
+                        ],
+                        "items":[
+                          {
+                            "type":"automaticApprovalReview",
+                            "id":"automatic-approval-review:call_approval",
+                            "targetItemId":"call_approval",
+                            "status":"approved",
+                            "startedAtMs":1000500,
+                            "privateText":"private review text"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """.utf8
+    )
+    let snapshotObservations = try decoder.decode(snapshot)
+    try check(
+        snapshotObservations.contains {
+            if case let .permissionRequested(targetItemID, startedAt) = $0.kind {
+                return targetItemID == "call_approval"
+                    && startedAt == Date(timeIntervalSince1970: 1000)
+                    && $0.sessionID == "session-approval"
+                    && $0.turnID == "turn-approval"
+                    && $0.source == .snapshot
+            }
+            return false
+        },
+        "Snapshot permission request was not reduced to a compact observation"
+    )
+    try check(
+        snapshotObservations.contains {
+            if case let .automaticReview(targetItemID, status, _) = $0.kind {
+                return targetItemID == "call_approval" && status == .approved
+            }
+            return false
+        },
+        "Snapshot automatic-review result was not decoded"
+    )
+    try check(
+        snapshotObservations.contains {
+            if case .waitingOnApproval(true) = $0.kind {
+                return $0.turnID == "turn-approval"
+            }
+            return false
+        },
+        "Snapshot manual-approval state was not decoded"
+    )
+    let observationDescription = String(reflecting: snapshotObservations)
+    try check(
+        !observationDescription.contains("private snapshot text")
+            && !observationDescription.contains("private review text"),
+        "Compact approval observations retained conversation content"
+    )
+
+    func patch(_ value: [String: Any], path: [Any]) throws
+        -> [CodexApprovalObservation]
+    {
+        let root: [String: Any] = [
+            "type": "broadcast",
+            "method": "thread-stream-state-changed",
+            "version": 11,
+            "params": [
+                "conversationId": "session-approval",
+                "change": [
+                    "type": "patches",
+                    "patches": [
+                        [
+                            "op": "replace",
+                            "path": path,
+                            "value": value,
+                        ]
+                    ],
+                ],
+            ],
+        ]
+        return try decoder.decodeJSONObject(root)
+    }
+
+    let inProgress = try patch(
+        [
+            "type": "automaticApprovalReview",
+            "targetItemId": "call_approval",
+            "status": "inProgress",
+            "startedAtMs": 1_000_500,
+        ],
+        path: [
+            "turnHistory", "history", "entitiesByKey", "entity-1", "items", 0,
+        ]
+    )
+    try check(
+        inProgress.contains {
+            if case let .automaticReview(targetItemID, status, _) = $0.kind {
+                return targetItemID == "call_approval"
+                    && status == .inProgress
+                    && $0.turnID == "turn-approval"
+                    && $0.source == .live
+            }
+            return false
+        },
+        "Live automatic-review in-progress patch was not decoded"
+    )
+
+    let waitingEndedRoot: [String: Any] = [
+        "type": "broadcast",
+        "method": "thread-stream-state-changed",
+        "version": 11,
+        "params": [
+            "conversationId": "session-approval",
+            "change": [
+                "type": "patches",
+                "patches": [
+                    [
+                        "op": "replace",
+                        "path": ["threadRuntimeStatus", "activeFlags"],
+                        "value": [],
+                    ]
+                ],
+            ],
+        ],
+    ]
+    let waitingEnded = try decoder.decodeJSONObject(waitingEndedRoot)
+    try check(
+        waitingEnded.contains {
+            if case .waitingOnApproval(false) = $0.kind { return true }
+            return false
+        },
+        "Live end of manual-approval state was not decoded"
+    )
+
+    var unsupportedVersion = waitingEndedRoot
+    unsupportedVersion["version"] = 12
+    do {
+        _ = try decoder.decodeJSONObject(unsupportedVersion)
+        throw TestFailure(description: "Unsupported approval-state version was accepted")
+    } catch CodexApprovalStateDecodeError.unsupportedVersion(12) {
+        // Expected.
+    }
+}
+
+private func testCodexApprovalCorrelation() throws {
+    let reviewStartedAt = Date(timeIntervalSince1970: 1_785_239_118.180)
+    let missingHookReference = CodexPendingApprovalReference(
+        key: "missing-hook",
+        sessionID: "session-approval",
+        turnID: "turn-approval",
+        targetItemID: nil,
+        requestedAt: Date(timeIntervalSince1970: 1_785_239_118)
+    )
+    let earlierReference = CodexPendingApprovalReference(
+        key: "earlier",
+        sessionID: "session-approval",
+        turnID: "turn-approval",
+        targetItemID: nil,
+        requestedAt: Date(timeIntervalSince1970: 1_785_239_108)
+    )
+
+    try check(
+        CodexApprovalCorrelation.matchingPendingKey(
+            sessionID: "session-approval",
+            turnID: "turn-approval",
+            targetItemID: "call_approved",
+            startedAt: reviewStartedAt,
+            candidates: [earlierReference, missingHookReference]
+        ) == "missing-hook",
+        "Approved review without a retained Hook run did not match the nearest pending request"
+    )
+
+    let exactReference = CodexPendingApprovalReference(
+        key: "exact",
+        sessionID: "session-approval",
+        turnID: "turn-approval",
+        targetItemID: "call_approved",
+        requestedAt: Date(timeIntervalSince1970: 1_785_239_000)
+    )
+    try check(
+        CodexApprovalCorrelation.matchingPendingKey(
+            sessionID: "session-approval",
+            turnID: "turn-approval",
+            targetItemID: "call_approved",
+            startedAt: reviewStartedAt,
+            candidates: [missingHookReference, exactReference]
+        ) == "exact",
+        "Exact approval ID did not take precedence over time correlation"
+    )
+
+    let otherSession = CodexPendingApprovalReference(
+        key: "other-session",
+        sessionID: "other-session",
+        turnID: "turn-approval",
+        targetItemID: nil,
+        requestedAt: reviewStartedAt
+    )
+    try check(
+        CodexApprovalCorrelation.matchingPendingKey(
+            sessionID: "session-approval",
+            turnID: "turn-approval",
+            targetItemID: "call_approved",
+            startedAt: reviewStartedAt,
+            candidates: [otherSession]
+        ) == nil,
+        "Approval correlation crossed task boundaries"
+    )
+    try check(
+        CodexApprovalCorrelation.matchingPendingKey(
+            sessionID: "session-approval",
+            turnID: "turn-approval",
+            targetItemID: "call_approved",
+            startedAt: reviewStartedAt.addingTimeInterval(31),
+            candidates: [missingHookReference]
+        ) == nil,
+        "Unlinked approval correlation exceeded its fail-open time boundary"
+    )
+}
+
+private func testCodexApprovalNotificationCoordinator() throws {
+    let baseDate = Date(timeIntervalSince1970: 1_000)
+
+    func event(
+        _ eventID: String,
+        turnID: String = "turn",
+        offset: TimeInterval = 0
+    ) -> CodexEvent {
+        CodexEvent(
+            type: .permissionRequested,
+            sessionID: "session",
+            turnID: turnID,
+            eventID: eventID,
+            projectName: "project",
+            timestamp: baseDate.addingTimeInterval(offset)
+        )
+    }
+
+    func review(
+        _ status: CodexAutomaticApprovalStatus,
+        targetItemID: String? = "call_1",
+        offset: TimeInterval = 0
+    ) -> CodexApprovalObservation {
+        CodexApprovalObservation(
+            sessionID: "session",
+            turnID: "turn",
+            source: .live,
+            kind: .automaticReview(
+                targetItemID: targetItemID,
+                status: status,
+                startedAt: baseDate.addingTimeInterval(offset)
+            )
+        )
+    }
+
+    func waiting(_ value: Bool, turnID: String? = "turn")
+        -> CodexApprovalObservation
+    {
+        CodexApprovalObservation(
+            sessionID: "session",
+            turnID: turnID,
+            source: .live,
+            kind: .waitingOnApproval(value)
+        )
+    }
+
+    func notificationCauses(
+        _ effects: [CodexApprovalCoordinatorEffect]
+    ) -> [CodexApprovalNotificationCause] {
+        effects.compactMap {
+            if case let .notify(_, cause) = $0 { return cause }
+            return nil
+        }
+    }
+
+    var approved = CodexApprovalNotificationCoordinator()
+    let approvedEvent = event("approved")
+    let initialEffects = approved.receive(approvedEvent)
+    try check(
+        initialEffects.contains(.scheduleUnknownFallback(key: approvedEvent.uniqueKey))
+            && initialEffects.contains(.followSession("session")),
+        "A new approval was not monitored with a bounded unknown-state fallback"
+    )
+    let inProgressEffects = approved.receive(review(.inProgress))
+    try check(
+        inProgressEffects.contains(
+            .cancelUnknownFallback(key: approvedEvent.uniqueKey)
+        ),
+        "Automatic review did not cancel the unknown-state fallback"
+    )
+    try check(
+        notificationCauses(
+            approved.unknownFallbackFired(key: approvedEvent.uniqueKey)
+        ).isEmpty,
+        "A cancelled automatic-review fallback still notified"
+    )
+    let approvedEffects = approved.receive(review(.approved, offset: 1))
+    try check(
+        notificationCauses(approvedEffects).isEmpty
+            && approvedEffects.contains(.unfollowSession("session"))
+            && approved.pendingEvents.isEmpty,
+        "An automatically approved request was not suppressed and released"
+    )
+
+    var approvedBeforeHook = CodexApprovalNotificationCoordinator()
+    _ = approvedBeforeHook.receive(
+        review(.approved, targetItemID: nil, offset: 0.2)
+    )
+    let replayEffects = approvedBeforeHook.receive(event("late-hook"))
+    try check(
+        notificationCauses(replayEffects).isEmpty
+            && approvedBeforeHook.pendingEvents.isEmpty,
+        "An approval result arriving before its Hook event was not replayed"
+    )
+
+    var inProgressBeforeHook = CodexApprovalNotificationCoordinator()
+    _ = inProgressBeforeHook.receive(
+        review(.inProgress, targetItemID: nil, offset: 0.2)
+    )
+    let inProgressReplayEffects = inProgressBeforeHook.receive(
+        event("in-progress-before-hook")
+    )
+    try check(
+        !inProgressReplayEffects.contains {
+            if case .scheduleUnknownFallback = $0 { return true }
+            return false
+        }
+            && inProgressBeforeHook.pendingEvents.count == 1,
+        "An in-progress review arriving first was converted back into a timer"
+    )
+
+    var completedReviewBeforeHook = CodexApprovalNotificationCoordinator()
+    _ = completedReviewBeforeHook.receive(
+        review(.inProgress, targetItemID: nil, offset: 0.2)
+    )
+    _ = completedReviewBeforeHook.receive(
+        review(.approved, targetItemID: nil, offset: 0.2)
+    )
+    let completedReplayEffects = completedReviewBeforeHook.receive(
+        event("completed-review-before-hook")
+    )
+    try check(
+        notificationCauses(completedReplayEffects).isEmpty
+            && completedReviewBeforeHook.pendingEvents.isEmpty,
+        "A cached final review result did not supersede its earlier in-progress state"
+    )
+    let laterUnrelatedEvent = event(
+        "after-completed-review",
+        offset: 0.3
+    )
+    let laterUnrelatedEffects = completedReviewBeforeHook.receive(
+        laterUnrelatedEvent
+    )
+    try check(
+        laterUnrelatedEffects.contains(
+            .scheduleUnknownFallback(key: laterUnrelatedEvent.uniqueKey)
+        ),
+        "A consumed cached review leaked into a later approval request"
+    )
+
+    for status in [
+        CodexAutomaticApprovalStatus.denied,
+        .timedOut,
+        .aborted,
+    ] {
+        var coordinator = CodexApprovalNotificationCoordinator()
+        let candidate = event("status-\(status)")
+        _ = coordinator.receive(candidate)
+        let effects = coordinator.receive(review(status))
+        try check(
+            notificationCauses(effects).isEmpty
+                && coordinator.pendingEvents.isEmpty,
+            "\(status) incorrectly implied that the user must approve"
+        )
+    }
+
+    var waitingAfterHook = CodexApprovalNotificationCoordinator()
+    let manualEvent = event("manual")
+    _ = waitingAfterHook.receive(manualEvent)
+    let manualEffects = waitingAfterHook.receive(waiting(true), now: baseDate)
+    try check(
+        notificationCauses(manualEffects) == [.requiresUserAction]
+            && waitingAfterHook.pendingEvents.isEmpty,
+        "A definite manual approval did not notify exactly once"
+    )
+    try check(
+        notificationCauses(
+            waitingAfterHook.receive(waiting(true), now: baseDate)
+        ).isEmpty
+            && waitingAfterHook.receive(event("hook-after-waiting")).isEmpty,
+        "Repeated state or a late Hook duplicated a manual-approval notification"
+    )
+
+    _ = waitingAfterHook.receive(waiting(false), now: baseDate)
+    let secondManual = event("manual-2", offset: 2)
+    _ = waitingAfterHook.receive(secondManual)
+    try check(
+        notificationCauses(
+            waitingAfterHook.receive(
+                waiting(true),
+                now: baseDate.addingTimeInterval(2)
+            )
+        ) == [.requiresUserAction],
+        "A later, separate waiting episode was suppressed"
+    )
+
+    var waitingBeforeHook = CodexApprovalNotificationCoordinator()
+    let stateFirstEffects = waitingBeforeHook.receive(waiting(true), now: baseDate)
+    try check(
+        notificationCauses(stateFirstEffects) == [.requiresUserAction]
+            && waitingBeforeHook.receive(event("state-first-hook")).isEmpty,
+        "Waiting state before Hook did not produce one order-independent notification"
+    )
+
+    var multiple = CodexApprovalNotificationCoordinator()
+    let earlier = event("earlier", offset: 0)
+    let later = event("later", offset: 1)
+    _ = multiple.receive(earlier)
+    _ = multiple.receive(later)
+    let multipleEffects = multiple.receive(
+        waiting(true),
+        now: baseDate.addingTimeInterval(1)
+    )
+    let notifiedEvents = multipleEffects.compactMap {
+        if case let .notify(event, _) = $0 { return event }
+        return nil
+    }
+    try check(
+        notifiedEvents == [later] && multiple.pendingEvents.isEmpty,
+        "Multiple same-turn candidates produced duplicates or selected the wrong event"
+    )
+
+    var unavailable = CodexApprovalNotificationCoordinator()
+    let unknownEvent = event("unknown")
+    _ = unavailable.monitorHealthChanged(.unavailable)
+    _ = unavailable.receive(unknownEvent)
+    let fallbackEffects = unavailable.unknownFallbackFired(
+        key: unknownEvent.uniqueKey
+    )
+    try check(
+        notificationCauses(fallbackEffects) == [.unknownState],
+        "Unavailable state monitoring did not fail open with a generic notification"
+    )
+
+    var reset = CodexApprovalNotificationCoordinator()
+    let resetEvent = event("reset")
+    _ = reset.receive(resetEvent)
+    let resetEffects = reset.reset()
+    try check(
+        resetEffects.contains(.cancelUnknownFallback(key: resetEvent.uniqueKey))
+            && resetEffects.contains(.unfollowSession("session"))
+            && reset.pendingEvents.isEmpty,
+        "Reset did not cancel pending work and release its session subscription"
+    )
+
+    var completed = CodexApprovalNotificationCoordinator()
+    let completedEvent = event("completed")
+    _ = completed.receive(completedEvent)
+    let completedEffects = completed.complete(
+        sessionID: "session",
+        turnID: "turn"
+    )
+    try check(
+        completedEffects.contains(
+            .cancelUnknownFallback(key: completedEvent.uniqueKey)
+        )
+            && completedEffects.contains(.unfollowSession("session"))
+            && completed.pendingEvents.isEmpty,
+        "Turn completion did not clear pending approval state"
+    )
+}
+
+private func testCodexRecentSessionProvider() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CoPingRecentSessions-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let databaseURL = directory.appendingPathComponent("state_99.sqlite")
+    var database: OpaquePointer?
+    guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+        throw TestFailure(description: "Could not create recent-session test database")
+    }
+    defer { sqlite3_close(database) }
+
+    let statements = [
+        """
+        CREATE TABLE threads (
+          id TEXT PRIMARY KEY,
+          archived INTEGER NOT NULL,
+          thread_source TEXT,
+          source TEXT NOT NULL,
+          recency_at_ms INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+        """,
+        "INSERT INTO threads VALUES ('stale-user', 0, 'user', 'user', 800000, 800)",
+        "INSERT INTO threads VALUES ('archived-user', 1, 'user', 'user', 1000100, 1001)",
+        "INSERT INTO threads VALUES ('subagent-user', 0, 'subagent', 'user', 1000200, 1002)",
+        "INSERT INTO threads VALUES ('guardian-user', 0, 'user', 'guardian', 1000300, 1003)",
+    ]
+    for statement in statements {
+        guard sqlite3_exec(database, statement, nil, nil, nil) == SQLITE_OK else {
+            throw TestFailure(description: "Could not prepare recent-session test data")
+        }
+    }
+    for index in 0..<15 {
+        let statement = """
+            INSERT INTO threads VALUES (
+              'recent-\(String(format: "%02d", index))',
+              0,
+              'user',
+              'user',
+              \(1_000_000 - index),
+              \(1_000 - index)
+            )
+            """
+        guard sqlite3_exec(database, statement, nil, nil, nil) == SQLITE_OK else {
+            throw TestFailure(description: "Could not add recent session \(index)")
+        }
+    }
+
+    let sessionIDs = try CodexRecentSessionProvider(codexDirectory: directory)
+        .recentSessionIDs(
+            activeWithin: 60,
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+    try check(
+        sessionIDs.count == 15
+            && sessionIDs.first == "recent-00"
+            && sessionIDs.last == "recent-14"
+            && !sessionIDs.contains("stale-user"),
+        "Recent-session discovery was capped, stale, private, or incorrectly ordered"
     )
 }
 
@@ -232,6 +976,35 @@ private func testSocketRoundTrip() throws {
     try UnixSocketClient.send(expected, path: path)
     try check(semaphore.wait(timeout: .now() + 1) == .success, "Socket event timed out")
     try check(received.value == expected, "Socket event changed in transit")
+
+    let legacyPath = "/tmp/coping-legacy-test-\(UUID().uuidString).sock"
+    let legacySemaphore = DispatchSemaphore(value: 0)
+    let legacyReceived = LockedEvent()
+    let legacyServer = UnixSocketServer(
+        path: legacyPath,
+        eventIDProvider: { "normalized-event-id" }
+    ) {
+        legacyReceived.value = $0
+        legacySemaphore.signal()
+    }
+    try legacyServer.start()
+    defer { legacyServer.stop() }
+    let legacyPermission = CodexEvent(
+        type: .permissionRequested,
+        sessionID: "legacy-session",
+        turnID: "legacy-turn",
+        eventID: nil,
+        projectName: "legacy-project"
+    )
+    try UnixSocketClient.send(legacyPermission, path: legacyPath)
+    try check(
+        legacySemaphore.wait(timeout: .now() + 1) == .success,
+        "Legacy permission event timed out"
+    )
+    try check(
+        legacyReceived.value?.eventID == "normalized-event-id",
+        "An installed legacy Hook event was not assigned a unique local ID"
+    )
 }
 
 private func testDeviceKeyAndHistory() throws {
@@ -1733,6 +2506,10 @@ private struct CoPingSelfTests {
         do {
             try testPayloadSanitizer()
             try testCodexNotificationPreferences()
+            try testCodexApprovalStateDecoder()
+            try testCodexApprovalCorrelation()
+            try testCodexApprovalNotificationCoordinator()
+            try testCodexRecentSessionProvider()
             try testCodexConnectionStatus()
             try testCodexTaskTitleResolver()
             try testHookConfiguration()

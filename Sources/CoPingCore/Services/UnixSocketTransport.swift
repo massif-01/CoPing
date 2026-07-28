@@ -1,5 +1,11 @@
 import Darwin
 import Foundation
+import OSLog
+
+private let hookSocketLogger = Logger(
+    subsystem: "com.coping.app",
+    category: "HookSocket"
+)
 
 public enum UnixSocketError: Error {
     case createFailed(Int32)
@@ -16,16 +22,19 @@ public final class UnixSocketServer: @unchecked Sendable {
     private let path: String
     private let queue: DispatchQueue
     private let handler: EventHandler
+    private let eventIDProvider: @Sendable () -> String
     private var descriptor: Int32 = -1
     private var source: DispatchSourceRead?
 
     public init(
         path: String = CoPingPaths.socketPath(),
         queue: DispatchQueue = DispatchQueue(label: "com.coping.socket"),
+        eventIDProvider: @escaping @Sendable () -> String = { UUID().uuidString },
         handler: @escaping EventHandler
     ) {
         self.path = path
         self.queue = queue
+        self.eventIDProvider = eventIDProvider
         self.handler = handler
     }
 
@@ -93,7 +102,16 @@ public final class UnixSocketServer: @unchecked Sendable {
         }
         guard collected.count <= 16_384 else { return }
         if collected.last == 0x0A { collected.removeLast() }
-        guard let event = try? JSONDecoder().decode(CodexEvent.self, from: collected) else { return }
+        guard let decoded = try? JSONDecoder().decode(CodexEvent.self, from: collected) else {
+            hookSocketLogger.error(
+                "Rejected local Hook event bytes=\(collected.count, privacy: .public)"
+            )
+            return
+        }
+        let event = decoded.addingEventIDIfMissing(eventIDProvider())
+        hookSocketLogger.info(
+            "Received \(event.type.rawValue, privacy: .public) session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public)"
+        )
         handler(event)
     }
 }
