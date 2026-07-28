@@ -286,8 +286,263 @@ private func testDeviceKeyAndHistory() throws {
     }
     try store.save(records)
     try check(store.load().count == 2, "History did not enforce its limit")
+
+    let legacyRecord = DeliveryRecord(
+        id: UUID(),
+        timestamp: Date(timeIntervalSince1970: 10),
+        eventType: .completed,
+        projectName: "legacy",
+        outcome: .sent,
+        detail: nil
+    )
+    let legacyObject = try JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(legacyRecord)
+    ) as! [String: Any]
+    var oldShape = legacyObject
+    oldShape.removeValue(forKey: "attempts")
+    let decodedLegacy = try JSONDecoder().decode(
+        DeliveryRecord.self,
+        from: JSONSerialization.data(withJSONObject: oldShape)
+    )
+    try check(
+        decodedLegacy.effectiveAttempts
+            == [DeliveryRecord.Attempt(channel: .bark, outcome: .sent)],
+        "Legacy history was not interpreted as a Bark delivery"
+    )
+
+    let aggregate = DeliveryRecord(
+        eventType: .questionRequested,
+        projectName: "aggregate",
+        attempts: [
+            DeliveryRecord.Attempt(channel: .bark, outcome: .sent),
+            DeliveryRecord.Attempt(
+                channel: .ntfy,
+                outcome: .failed,
+                detail: "failed"
+            ),
+        ]
+    )
+    try check(
+        aggregate.outcome == .failed,
+        "A partial delivery changed the persisted compatibility outcome"
+    )
+    try check(
+        aggregate.aggregateStatus == .partial,
+        "A mixed channel result was not represented as partial"
+    )
+    try check(aggregate.effectiveAttempts.count == 2, "An event lost a channel result")
+    let aggregateJSON = try String(
+        decoding: JSONEncoder().encode(aggregate),
+        as: UTF8.self
+    )
+    try check(
+        !aggregateJSON.contains("partial"),
+        "The computed partial status changed the persisted history contract"
+    )
+
     try store.clear()
     try check(store.load().isEmpty, "History was not cleared")
+}
+
+private func testNtfyConfigurationStore() throws {
+    try check(
+        NtfyConfiguration.serverURL.absoluteString == "https://ntfy.sh",
+        "NTFY did not use the fixed official HTTPS service"
+    )
+    let validTopic = "coping-abcdefghijklmnopqrstuvwxyz"
+    let valid = try NtfyConfiguration(topicInput: validTopic)
+    try check(valid.topic == validTopic, "A valid generated NTFY topic changed")
+
+    for invalid in [
+        "",
+        "user-chosen-topic",
+        "coping-valid_topic-123",
+        "coping-abcdefghijklmnopqrstuvwxy1",
+        " \(validTopic)",
+        "\(validTopic)\n",
+        String(repeating: "a", count: 65),
+    ] {
+        do {
+            _ = try NtfyConfiguration(topicInput: invalid)
+            throw TestFailure(description: "An invalid NTFY topic was accepted")
+        } catch NtfyConfigurationError.invalidTopic {
+            // Expected.
+        }
+    }
+
+    let generated = NtfyTopicGenerator.generate()
+    let secondGenerated = NtfyTopicGenerator.generate()
+    try check(
+        generated.range(
+            of: #"^coping-[a-z2-7]{26}$"#,
+            options: .regularExpression
+        ) != nil,
+        "Generated NTFY topic did not meet the random topic contract"
+    )
+    try check(generated != secondGenerated, "Two generated NTFY topics were identical")
+
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CoPingNtfy-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let fileURL = directory.appendingPathComponent("ntfy.json")
+    let store = NtfyConfigurationStore(fileURL: fileURL)
+    let freshConfiguration = try store.read()
+    try check(freshConfiguration == nil, "Fresh NTFY configuration was not empty")
+    try store.save(valid)
+    let savedConfiguration = try store.read()
+    try check(savedConfiguration == valid, "NTFY configuration round trip failed")
+
+    let directoryAttributes = try FileManager.default.attributesOfItem(atPath: directory.path)
+    let directoryPermissions =
+        (directoryAttributes[.posixPermissions] as? NSNumber)?.intValue
+    try check(directoryPermissions == 0o700, "NTFY directory permissions were not 0700")
+    let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+    let filePermissions = (fileAttributes[.posixPermissions] as? NSNumber)?.intValue
+    try check(filePermissions == 0o600, "NTFY configuration permissions were not 0600")
+
+    let storedJSON = try String(decoding: Data(contentsOf: fileURL), as: UTF8.self)
+    try check(!storedJSON.contains("ntfy.sh"), "NTFY service address was stored as a secret")
+
+    let invalidStoredTopic = Data(#"{"topic":"contains/slash"}"#.utf8)
+    try invalidStoredTopic.write(to: fileURL, options: [.atomic])
+    do {
+        _ = try store.read()
+        throw TestFailure(description: "An invalid stored NTFY topic bypassed validation")
+    } catch NtfyConfigurationError.invalidTopic {
+        // Expected.
+    }
+    let retainedInvalidStoredTopic = try Data(contentsOf: fileURL)
+    try check(
+        retainedInvalidStoredTopic == invalidStoredTopic,
+        "Reading an invalid stored NTFY topic modified the original file"
+    )
+
+    let malformed = Data("{broken".utf8)
+    try malformed.write(to: fileURL, options: [.atomic])
+    do {
+        _ = try store.read()
+        throw TestFailure(description: "Malformed NTFY configuration was accepted")
+    } catch DecodingError.dataCorrupted {
+        // Expected.
+    } catch DecodingError.keyNotFound {
+        // Expected.
+    }
+    let retainedMalformedConfiguration = try Data(contentsOf: fileURL)
+    try check(
+        retainedMalformedConfiguration == malformed,
+        "Reading malformed NTFY configuration modified the original file"
+    )
+}
+
+private func testNtfySettingsCoordinator() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CoPingNtfySettings-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let suiteName = "CoPingNtfySettingsTests.\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+        throw TestFailure(description: "Unable to create isolated UserDefaults")
+    }
+    defer {
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    let fileURL = directory.appendingPathComponent("ntfy.json")
+    let store = NtfyConfigurationStore(fileURL: fileURL)
+
+    defaults.set(true, forKey: NtfySettingsCoordinator.enabledDefaultsKey)
+    var missing = NtfySettingsCoordinator(
+        configurationStore: store,
+        defaults: defaults
+    )
+    try check(!missing.isEnabled, "A missing topic retained an enabled NTFY switch")
+    try check(
+        defaults.bool(forKey: NtfySettingsCoordinator.enabledDefaultsKey) == false,
+        "A missing topic did not persist the fail-closed switch state"
+    )
+    try check(
+        !missing.configurationReadFailed,
+        "A missing topic was reported as a corrupt configuration"
+    )
+    try check(
+        !missing.hasCurrentConfiguration,
+        "A generated draft was treated as a saved configuration"
+    )
+    do {
+        try missing.setEnabled(true)
+        throw TestFailure(description: "An unsaved generated topic was enabled")
+    } catch NtfySettingsError.topicNotSaved {
+        // Expected.
+    }
+
+    try missing.save()
+    try missing.setEnabled(true)
+    let savedTopic = missing.topic
+    try check(missing.isEnabled, "A saved generated topic could not be enabled")
+
+    var restarted = NtfySettingsCoordinator(
+        configurationStore: store,
+        defaults: defaults
+    )
+    try check(
+        restarted.topic == savedTopic && restarted.isEnabled,
+        "A saved and enabled topic did not survive restart"
+    )
+
+    restarted.regenerateTopic()
+    try check(restarted.topic != savedTopic, "Topic regeneration retained the old topic")
+    try check(!restarted.isEnabled, "Topic regeneration left NTFY enabled")
+    try check(
+        !restarted.hasCurrentConfiguration,
+        "An unsaved regenerated topic was treated as active"
+    )
+    let retainedSavedTopic = try store.read()?.topic
+    try check(
+        retainedSavedTopic == savedTopic,
+        "Topic regeneration overwrote the saved topic before explicit save"
+    )
+    do {
+        try restarted.setEnabled(true)
+        throw TestFailure(description: "A regenerated draft was enabled before save")
+    } catch NtfySettingsError.topicNotSaved {
+        // Expected.
+    }
+
+    try restarted.save()
+    try restarted.setEnabled(true)
+    let rotatedTopic = restarted.topic
+    let rotatedRestart = NtfySettingsCoordinator(
+        configurationStore: store,
+        defaults: defaults
+    )
+    try check(
+        rotatedRestart.topic == rotatedTopic && rotatedRestart.isEnabled,
+        "A saved rotated topic did not survive restart"
+    )
+
+    let malformed = Data("{broken".utf8)
+    try malformed.write(to: fileURL, options: [.atomic])
+    defaults.set(true, forKey: NtfySettingsCoordinator.enabledDefaultsKey)
+    let corrupted = NtfySettingsCoordinator(
+        configurationStore: store,
+        defaults: defaults
+    )
+    try check(
+        corrupted.configurationReadFailed,
+        "A corrupt topic file was not reported"
+    )
+    try check(!corrupted.isEnabled, "A corrupt topic file retained enabled NTFY")
+    try check(
+        defaults.bool(forKey: NtfySettingsCoordinator.enabledDefaultsKey) == false,
+        "A corrupt topic file did not persist the fail-closed switch state"
+    )
+    let retainedMalformed = try Data(contentsOf: fileURL)
+    try check(
+        retainedMalformed == malformed,
+        "Fail-closed startup modified the corrupt configuration"
+    )
 }
 
 private final class LockedEvent: @unchecked Sendable {
@@ -442,6 +697,462 @@ private func testBarkClient() async throws {
             "The Bark Device Key leaked through the localized error"
         )
     }
+}
+
+private func testNtfyClient() async throws {
+    let topic = "coping-abcdefghijklmnopqrstuvwxyz"
+    let ntfyConfiguration = try NtfyConfiguration(topicInput: topic)
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [URLProtocolStub.self]
+    sessionConfiguration.timeoutIntervalForRequest = 10
+    sessionConfiguration.timeoutIntervalForResource = 10
+    let session = URLSession(configuration: sessionConfiguration)
+    defer { session.invalidateAndCancel() }
+    let client = NtfyClient(
+        configuration: ntfyConfiguration,
+        session: session
+    )
+    let notification = PushNotification(
+        title: "Title",
+        body: "private notification body",
+        urgency: .high,
+        sequenceID: "stable-sequence"
+    )
+    URLProtocolStub.handler = { request in
+        try check(
+            request.url?.absoluteString == "https://ntfy.sh",
+            "NTFY requested a non-official endpoint"
+        )
+        try check(
+            !(request.url?.absoluteString.contains(topic) ?? true),
+            "NTFY topic leaked into the request URL"
+        )
+        try check(
+            !(request.url?.absoluteString.contains("private") ?? true),
+            "NTFY notification body leaked into the request URL"
+        )
+        try check(request.httpMethod == "POST", "NTFY did not publish with POST")
+        try check(
+            request.value(forHTTPHeaderField: "Content-Type")
+                == "application/json; charset=utf-8",
+            "NTFY omitted its JSON content type"
+        )
+        try check(
+            request.value(forHTTPHeaderField: "Authorization") == nil,
+            "NTFY unexpectedly sent an authorization token"
+        )
+        let body = try bodyData(from: request)
+        guard
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else {
+            throw TestFailure(description: "Missing NTFY JSON body")
+        }
+        try check(json["topic"] as? String == topic, "NTFY topic missing from JSON")
+        try check(
+            json["message"] as? String == "private notification body",
+            "NTFY message missing from JSON"
+        )
+        try check(json["priority"] as? Int == 4, "NTFY high priority was not 4")
+        try check(
+            json["sequence_id"] as? String == "stable-sequence",
+            "NTFY sequence ID was not stable"
+        )
+        return (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data(#"{"id":"message-id","topic":"coping-abcdefghijklmnopqrstuvwxyz"}"#.utf8)
+        )
+    }
+    defer { URLProtocolStub.handler = nil }
+    try await client.send(notification)
+
+    URLProtocolStub.handler = { request in
+        let body = try bodyData(from: request)
+        guard
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else {
+            throw TestFailure(description: "Missing normal-priority NTFY JSON body")
+        }
+        try check(json["priority"] as? Int == 3, "NTFY normal priority was not 3")
+        return (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data(#"{"id":"normal-id","topic":"coping-abcdefghijklmnopqrstuvwxyz"}"#.utf8)
+        )
+    }
+    let secondClient = NtfyClient(
+        configuration: ntfyConfiguration,
+        session: session
+    )
+    try await secondClient.send(
+        PushNotification(
+            title: "Normal",
+            body: "Normal body",
+            urgency: .normal,
+            sequenceID: "normal-sequence"
+        )
+    )
+
+    let redirectDelegate = NtfyRedirectRejectingDelegate()
+    let redirectTask = session.dataTask(
+        with: URL(string: "https://ntfy.sh")!
+    )
+    let redirectResponse = HTTPURLResponse(
+        url: URL(string: "https://ntfy.sh")!,
+        statusCode: 302,
+        httpVersion: nil,
+        headerFields: ["Location": "https://example.com/capture"]
+    )!
+    var redirectWasFollowed = true
+    redirectDelegate.urlSession(
+        session,
+        task: redirectTask,
+        willPerformHTTPRedirection: redirectResponse,
+        newRequest: URLRequest(
+            url: URL(string: "https://example.com/capture")!
+        )
+    ) { request in
+        redirectWasFollowed = request != nil
+    }
+    redirectTask.cancel()
+    try check(
+        !redirectWasFollowed,
+        "The NTFY URLSession redirect delegate followed a redirect"
+    )
+
+    URLProtocolStub.handler = { request in
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 302,
+                httpVersion: nil,
+                headerFields: ["Location": "https://example.com/capture"]
+            )!,
+            Data()
+        )
+    }
+    do {
+        try await client.send(notification)
+        throw TestFailure(description: "An NTFY redirect was accepted")
+    } catch NtfyError.redirected {
+        // Expected.
+    }
+
+    URLProtocolStub.handler = { request in
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data("private notification body \(topic)".utf8)
+        )
+    }
+    do {
+        try await client.send(notification)
+        throw TestFailure(description: "An unauthorized NTFY response was accepted")
+    } catch NtfyError.rejected(401) {
+        try check(
+            !NtfyError.rejected(401).localizedDescription.contains(topic),
+            "NTFY topic leaked through an error"
+        )
+        try check(
+            !NtfyError.rejected(401).localizedDescription.contains("private notification body"),
+            "NTFY notification body leaked through an error"
+        )
+    }
+
+    URLProtocolStub.handler = { request in
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 429,
+                httpVersion: nil,
+                headerFields: ["Retry-After": "5"]
+            )!,
+            Data()
+        )
+    }
+    do {
+        try await client.send(notification)
+        throw TestFailure(description: "An NTFY rate limit was accepted")
+    } catch NtfyError.rateLimited(5) {
+        // Expected.
+    }
+
+    try check(NtfyError.rejected(408).isRetryable, "NTFY HTTP 408 was not retryable")
+    try check(NtfyError.rejected(503).isRetryable, "NTFY HTTP 503 was not retryable")
+    try check(!NtfyError.rejected(401).isRetryable, "NTFY HTTP 401 was retryable")
+    try check(NtfyError.rateLimited(nil).isRetryable, "NTFY 429 without a delay was not retryable")
+    try check(NtfyError.rateLimited(10).isRetryable, "A reasonable NTFY 429 delay was rejected")
+    try check(!NtfyError.rateLimited(11).isRetryable, "A long NTFY 429 delay was retried")
+    try check(!NtfyError.rateLimited(-1).isRetryable, "A negative NTFY 429 delay was retried")
+    try check(BarkError.rejected(429).isRetryable, "Bark HTTP 429 was not retryable")
+    try check(BarkError.serverRejected(503).isRetryable, "Bark service 503 was not retryable")
+    try check(!BarkError.rejected(401).isRetryable, "Bark HTTP 401 was retryable")
+    try check(!BarkError.serverRejected(400).isRetryable, "Bark service 400 was retryable")
+}
+
+private struct TemporaryPushFailure: PushRetryClassifyingError {
+    let isRetryable = true
+    let suggestedRetryDelay: Duration? = .zero
+}
+
+private struct PermanentPushFailure: Error {}
+
+private enum ScriptedPushResult: Sendable {
+    case success
+    case temporaryFailure
+    case permanentFailure
+}
+
+private actor ScriptedPushProvider: PushProvider {
+    private var results: [ScriptedPushResult]
+    private(set) var sendCount = 0
+
+    init(_ results: [ScriptedPushResult]) {
+        self.results = results
+    }
+
+    func send(_ notification: PushNotification) async throws {
+        sendCount += 1
+        let result = results.isEmpty ? .success : results.removeFirst()
+        switch result {
+        case .success:
+            return
+        case .temporaryFailure:
+            throw TemporaryPushFailure()
+        case .permanentFailure:
+            throw PermanentPushFailure()
+        }
+    }
+}
+
+private actor ConcurrencyTracker {
+    private var active = 0
+    private(set) var maximum = 0
+
+    func begin() {
+        active += 1
+        maximum = max(maximum, active)
+    }
+
+    func end() {
+        active -= 1
+    }
+}
+
+private struct DelayedPushProvider: PushProvider {
+    let tracker: ConcurrencyTracker
+
+    func send(_ notification: PushNotification) async throws {
+        await tracker.begin()
+        try await Task.sleep(for: .milliseconds(40))
+        await tracker.end()
+    }
+}
+
+private actor AsyncSignal {
+    private var isSignaled = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isSignaled else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func signal() {
+        guard !isSignaled else { return }
+        isSignaled = true
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending {
+            continuation.resume()
+        }
+    }
+}
+
+private actor CancellablePushProvider: PushProvider {
+    let started: AsyncSignal
+    private(set) var sendCount = 0
+
+    init(started: AsyncSignal) {
+        self.started = started
+    }
+
+    func send(_ notification: PushNotification) async throws {
+        sendCount += 1
+        await started.signal()
+        do {
+            try await Task.sleep(for: .seconds(60))
+        } catch is CancellationError {
+            // Deliberately ignore provider cancellation. The dispatcher must
+            // still propagate its own cancelled state.
+        }
+    }
+}
+
+private func testPushDeliveryDispatcher() async throws {
+    let dispatcher = PushDeliveryDispatcher(retryDelays: [.zero, .zero])
+    let notification = PushNotification(
+        title: "Title",
+        body: "Body",
+        sequenceID: "dispatcher-test"
+    )
+
+    let retrying = ScriptedPushProvider([.temporaryFailure, .success])
+    let permanent = ScriptedPushProvider([.permanentFailure, .success])
+    let attempts = try await dispatcher.deliver(
+        notification,
+        to: [
+            PushDeliveryTarget(channel: .bark, provider: retrying),
+            PushDeliveryTarget(channel: .ntfy, provider: permanent),
+        ]
+    )
+    let retryingSendCount = await retrying.sendCount
+    let permanentSendCount = await permanent.sendCount
+    try check(retryingSendCount == 2, "A temporary failure was not retried")
+    try check(permanentSendCount == 1, "A permanent failure was retried")
+    try check(
+        attempts
+            == [
+                DeliveryRecord.Attempt(channel: .bark, outcome: .sent),
+                DeliveryRecord.Attempt(
+                    channel: .ntfy,
+                    outcome: .failed,
+                    detail: AppText.networkRequestFailed
+                ),
+            ],
+        "Partial channel results were not preserved"
+    )
+
+    let tracker = ConcurrencyTracker()
+    let concurrentAttempts = try await dispatcher.deliver(
+        notification,
+        to: [
+            PushDeliveryTarget(
+                channel: .bark,
+                provider: DelayedPushProvider(tracker: tracker)
+            ),
+            PushDeliveryTarget(
+                channel: .ntfy,
+                provider: DelayedPushProvider(tracker: tracker)
+            ),
+        ]
+    )
+    let maximumConcurrency = await tracker.maximum
+    try check(maximumConcurrency == 2, "Bark and NTFY were not sent concurrently")
+    try check(
+        concurrentAttempts.allSatisfy { $0.outcome == .sent },
+        "Concurrent delivery did not preserve successful outcomes"
+    )
+
+    let allFailed = try await dispatcher.deliver(
+        notification,
+        to: [
+            PushDeliveryTarget(
+                channel: .bark,
+                provider: ScriptedPushProvider([.permanentFailure])
+            ),
+            PushDeliveryTarget(
+                channel: .ntfy,
+                provider: ScriptedPushProvider([.permanentFailure])
+            ),
+        ]
+    )
+    try check(
+        allFailed.allSatisfy { $0.outcome == .failed },
+        "An all-channel failure was not preserved"
+    )
+
+    try check(
+        PushDeliveryRouting.eventChannels(
+            notificationsEnabled: false,
+            barkEnabled: true,
+            ntfyEnabled: true
+        ).isEmpty,
+        "Global pause still routed formal notifications"
+    )
+
+    let isolatedBark = ScriptedPushProvider([.success])
+    let isolatedNtfy = ScriptedPushProvider([.success])
+    let ntfyTestAttempts = try await dispatcher.deliver(
+        notification,
+        to: [
+            PushDeliveryTarget(channel: .ntfy, provider: isolatedNtfy),
+        ]
+    )
+    let barkCountAfterNtfyTest = await isolatedBark.sendCount
+    let ntfyCountAfterNtfyTest = await isolatedNtfy.sendCount
+    try check(
+        barkCountAfterNtfyTest == 0
+            && ntfyCountAfterNtfyTest == 1
+            && ntfyTestAttempts.map(\.channel) == [.ntfy],
+        "An NTFY test reached Bark or missed NTFY"
+    )
+
+    let barkTestAttempts = try await dispatcher.deliver(
+        notification,
+        to: [
+            PushDeliveryTarget(channel: .bark, provider: isolatedBark),
+        ]
+    )
+    let barkCountAfterBarkTest = await isolatedBark.sendCount
+    let ntfyCountAfterBarkTest = await isolatedNtfy.sendCount
+    try check(
+        barkCountAfterBarkTest == 1
+            && ntfyCountAfterBarkTest == 1
+            && barkTestAttempts.map(\.channel) == [.bark],
+        "A Bark test reached NTFY or missed Bark"
+    )
+    try check(
+        PushDeliveryRouting.eventChannels(
+            notificationsEnabled: true,
+            barkEnabled: true,
+            ntfyEnabled: true
+        ) == [.bark, .ntfy],
+        "Formal delivery did not route to both enabled channels"
+    )
+
+    let cancellationStarted = AsyncSignal()
+    let cancellableProvider = CancellablePushProvider(
+        started: cancellationStarted
+    )
+    let cancellationTask = Task {
+        try await dispatcher.deliver(
+            notification,
+            to: [
+                PushDeliveryTarget(
+                    channel: .ntfy,
+                    provider: cancellableProvider
+                ),
+            ]
+        )
+    }
+    await cancellationStarted.wait()
+    cancellationTask.cancel()
+    do {
+        _ = try await cancellationTask.value
+        throw TestFailure(description: "A cancelled delivery returned an outcome")
+    } catch is CancellationError {
+        // Expected.
+    }
+    let cancelledSendCount = await cancellableProvider.sendCount
+    try check(
+        cancelledSendCount == 1,
+        "A cancelled delivery retried or skipped its in-flight provider"
+    )
 }
 
 private func testLanguageResolution() throws {
@@ -1027,12 +1738,16 @@ private struct CoPingSelfTests {
             try testHookConfiguration()
             try testSocketRoundTrip()
             try testDeviceKeyAndHistory()
+            try testNtfyConfigurationStore()
+            try testNtfySettingsCoordinator()
             try testSemanticVersionAndChecksum()
             try testLanguageResolution()
             try await testNoticeLifecycle()
             try await testGitHubReleaseClient()
             try await testReleaseDownloader()
             try await testBarkClient()
+            try await testNtfyClient()
+            try await testPushDeliveryDispatcher()
             print("CoPingSelfTests: PASS")
         } catch {
             fputs("CoPingSelfTests: FAIL: \(error)\n", stderr)

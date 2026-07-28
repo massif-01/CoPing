@@ -33,6 +33,13 @@ public enum CoPingPaths {
             .appendingPathComponent("config.json", isDirectory: false)
     }
 
+    public static func ntfyConfigurationFile(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        applicationSupport(homeDirectory: homeDirectory)
+            .appendingPathComponent("ntfy.json", isDirectory: false)
+    }
+
     public static func socketPath(userID: uid_t = getuid()) -> String {
         "/tmp/coping-\(userID).sock"
     }

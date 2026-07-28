@@ -29,7 +29,6 @@ cp "$BIN_DIR/CoPingHook" "$APP_HELPERS/CoPingHook"
 cp "$ROOT_DIR/Packaging/Info.plist" "$APP_CONTENTS/Info.plist"
 cp "$ROOT_DIR/Packaging/CoPing.icns" "$APP_RESOURCES/CoPing.icns"
 cp "$ROOT_DIR/CoPing.icon/Assets/CoPing-orbit-mark.svg" "$APP_RESOURCES/CoPing-orbit-mark.svg"
-cp "$ROOT_DIR/Sources/CoPing/Resources/BarkIcon.png" "$APP_RESOURCES/BarkIcon.png"
 cp "$ROOT_DIR/Sources/CoPing/Resources/GitHubMark.svg" "$APP_RESOURCES/GitHubMark.svg"
 chmod +x "$APP_MACOS/CoPing" "$APP_HELPERS/CoPingHook"
 

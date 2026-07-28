@@ -1,3 +1,4 @@
+import AppKit
 import CoPingCore
 import CoPingAppSupport
 import Combine
@@ -9,6 +10,8 @@ final class AppModel: ObservableObject {
 
     @Published var baseURLString: String
     @Published var deviceKey: String
+    @Published var barkEnabled: Bool
+    @Published private var ntfySettings: NtfySettingsCoordinator
     @Published var notificationsEnabled: Bool
     @Published var ignorePermissionNotifications: Bool
     @Published var launchAtLogin: Bool
@@ -21,6 +24,13 @@ final class AppModel: ObservableObject {
     private let defaults = UserDefaults.standard
     private let deviceKeyStore = DeviceKeyStore()
     private let historyStore = DeliveryHistoryStore()
+    private let deliveryDispatcher = PushDeliveryDispatcher()
+    private let ntfySession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 10
+        return URLSession(configuration: configuration)
+    }()
     private let helperInstaller = HelperInstaller()
     private let hookManager = HookConfigurationManager()
     private let loginManager = LoginItemManager()
@@ -44,14 +54,20 @@ final class AppModel: ObservableObject {
 
     init(startServices: Bool = true) {
         let deviceKeyReadFailed: Bool
+        let loadedDeviceKey: String
         baseURLString = defaults.string(forKey: "barkBaseURL") ?? "https://api.day.app"
         do {
-            deviceKey = try deviceKeyStore.read() ?? ""
+            loadedDeviceKey = try deviceKeyStore.read() ?? ""
             deviceKeyReadFailed = false
         } catch {
-            deviceKey = ""
+            loadedDeviceKey = ""
             deviceKeyReadFailed = true
         }
+        deviceKey = loadedDeviceKey
+        ntfySettings = NtfySettingsCoordinator(defaults: defaults)
+        barkEnabled =
+            defaults.object(forKey: "barkEnabled") as? Bool
+            ?? !loadedDeviceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
         ignorePermissionNotifications =
             defaults.object(forKey: "ignorePermissionNotifications") as? Bool ?? false
@@ -85,7 +101,13 @@ final class AppModel: ObservableObject {
 
         if deviceKeyReadFailed {
             showNotice(AppText.barkConfigurationReadFailed, kind: .error)
+        } else if ntfySettings.configurationReadFailed {
+            showNotice(AppText.ntfyConfigurationReadFailed, kind: .error)
         }
+    }
+
+    deinit {
+        ntfySession.invalidateAndCancel()
     }
 
     var codexDetected: Bool { CodexDetector.isInstalled }
@@ -93,15 +115,28 @@ final class AppModel: ObservableObject {
         !deviceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (try? validatedBaseURL()) != nil
     }
+    var hasNtfyConfiguration: Bool {
+        ntfySettings.hasCurrentConfiguration
+    }
+    var ntfyTopic: String { ntfySettings.topic }
+    var ntfyEnabled: Bool { ntfySettings.isEnabled }
 
     var menuStatusText: String {
         if !notificationsEnabled { return AppText.notificationsPaused }
         if connectionStatus == .error { return AppText.configurationError }
-        if records.first?.outcome == .failed { return AppText.recentPushFailed }
+        if records.first?.aggregateStatus == .failed { return AppText.recentPushFailed }
+        if records.first?.aggregateStatus == .partial {
+            return AppText.recentPushPartiallyFailed
+        }
         return connectionStatus.label
     }
 
     func saveBarkSettings() {
+        _ = persistBarkSettings(showConfirmation: true)
+    }
+
+    @discardableResult
+    private func persistBarkSettings(showConfirmation: Bool) -> Bool {
         do {
             let configuration = try BarkConfiguration(
                 baseURLString: baseURLString,
@@ -111,31 +146,122 @@ final class AppModel: ObservableObject {
             deviceKey = configuration.deviceKey
             baseURLString = configuration.baseURL.absoluteString
             defaults.set(baseURLString, forKey: "barkBaseURL")
-            showNotice(AppText.barkSettingsSaved, kind: .success)
+            if showConfirmation {
+                showNotice(AppText.barkSettingsSaved, kind: .success)
+            }
+            return true
+        } catch {
+            showNotice(error.localizedDescription, kind: .error)
+            return false
+        }
+    }
+
+    func setBarkEnabled(_ enabled: Bool) {
+        guard !enabled || hasBarkConfiguration else {
+            showNotice(AppText.barkNotConfigured, kind: .error)
+            return
+        }
+        barkEnabled = enabled
+        defaults.set(enabled, forKey: "barkEnabled")
+    }
+
+    func saveNtfySettings() {
+        _ = persistNtfySettings(showConfirmation: true)
+    }
+
+    @discardableResult
+    private func persistNtfySettings(showConfirmation: Bool) -> Bool {
+        do {
+            try ntfySettings.save()
+            if showConfirmation {
+                showNotice(AppText.ntfySettingsSaved, kind: .success)
+            }
+            return true
+        } catch {
+            showNotice(error.localizedDescription, kind: .error)
+            return false
+        }
+    }
+
+    func setNtfyEnabled(_ enabled: Bool) {
+        do {
+            try ntfySettings.setEnabled(enabled)
         } catch {
             showNotice(error.localizedDescription, kind: .error)
         }
     }
 
-    func sendTestNotification() {
-        saveBarkSettings()
-        guard hasBarkConfiguration else { return }
+    func copyNtfyTopic() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(ntfyTopic, forType: .string)
+        showNotice(AppText.ntfyTopicCopied, kind: .success)
+    }
+
+    func regenerateNtfyTopic() {
+        ntfySettings.regenerateTopic()
+        showNotice(AppText.ntfyTopicRegenerated, kind: .information)
+    }
+
+    func sendBarkTestNotification() {
+        guard !isBusy else { return }
+        guard persistBarkSettings(showConfirmation: false) else { return }
+        do {
+            sendTestNotification(
+                PushNotification(
+                    title: AppText.testNotificationTitle,
+                    body: AppText.testNotificationBody
+                ),
+                to: try barkTarget()
+            )
+        } catch {
+            showNotice(error.localizedDescription, kind: .error)
+        }
+    }
+
+    func sendNtfyTestNotification() {
+        guard !isBusy else { return }
+        guard
+            persistNtfySettings(showConfirmation: false),
+            let target = ntfyTarget()
+        else {
+            return
+        }
+        sendTestNotification(
+            PushNotification(
+                title: AppText.testNotificationTitle,
+                body: AppText.ntfyTestNotificationBody
+            ),
+            to: target
+        )
+    }
+
+    private func sendTestNotification(
+        _ notification: PushNotification,
+        to target: PushDeliveryTarget
+    ) {
+        guard !isBusy else { return }
         isBusy = true
         Task {
+            defer { isBusy = false }
             let event = CodexEvent(
                 type: .completed,
                 sessionID: "test",
                 turnID: UUID().uuidString,
                 projectName: "CoPing"
             )
-            await deliver(
-                PushNotification(
-                    title: AppText.testNotificationTitle,
-                    body: AppText.testNotificationBody
-                ),
-                for: event
-            )
-            isBusy = false
+            do {
+                let attempts = try await deliveryDispatcher.deliver(
+                    notification,
+                    to: [target]
+                )
+                appendRecord(for: event, attempts: attempts)
+                presentDeliveryResult(attempts)
+            } catch is CancellationError {
+                return
+            } catch {
+                showNotice(AppText.networkRequestFailed, kind: .error)
+            }
         }
     }
 
@@ -291,7 +417,11 @@ final class AppModel: ObservableObject {
                 return
             }
             await self.deliver(
-                PushNotification(title: title, body: body),
+                PushNotification(
+                    title: title,
+                    body: body,
+                    urgency: .high
+                ),
                 for: event
             )
             self.pendingInterventions[event.turnKey] = nil
@@ -303,56 +433,145 @@ final class AppModel: ObservableObject {
     }
 
     private func deliver(_ notification: PushNotification, for event: CodexEvent) async {
+        let deliveryChannels = PushDeliveryRouting.eventChannels(
+            notificationsEnabled: notificationsEnabled,
+            barkEnabled: barkEnabled,
+            ntfyEnabled: ntfyEnabled
+        )
         guard notificationsEnabled else {
-            appendRecord(for: event, outcome: .skipped, detail: AppText.notificationsPaused)
-            return
-        }
-        guard hasBarkConfiguration else {
-            appendRecord(for: event, outcome: .skipped, detail: AppText.barkNotConfigured)
+            let attempts = enabledChannels.map {
+                DeliveryRecord.Attempt(
+                    channel: $0,
+                    outcome: .skipped,
+                    detail: AppText.notificationsPaused
+                )
+            }
+            appendRecord(
+                for: event,
+                attempts: attempts,
+                detail: attempts.isEmpty ? AppText.notificationsPaused : nil
+            )
             return
         }
 
-        do {
-            let client = try BarkClient(
-                baseURL: validatedBaseURL(),
-                deviceKey: deviceKey
-            )
-            let delays: [Duration] = [.zero, .seconds(2), .seconds(10)]
-            var lastError: Error?
-            for delay in delays {
-                if delay != .zero { try? await Task.sleep(for: delay) }
-                do {
-                    try await client.send(notification)
-                    appendRecord(for: event, outcome: .sent)
-                    showNotice(AppText.notificationSent, kind: .success)
-                    return
-                } catch {
-                    lastError = error
-                }
+        var targets: [PushDeliveryTarget] = []
+        var attemptsByChannel: [PushChannel: DeliveryRecord.Attempt] = [:]
+
+        if deliveryChannels.contains(.bark) {
+            do {
+                targets.append(try barkTarget())
+            } catch {
+                attemptsByChannel[.bark] = DeliveryRecord.Attempt(
+                    channel: .bark,
+                    outcome: .failed,
+                    detail: AppText.barkNotConfigured
+                )
             }
-            throw lastError ?? BarkError.invalidResponse
-        } catch {
-            appendRecord(for: event, outcome: .failed, detail: safeError(error))
-            showNotice(AppText.pushFailed(safeError(error)), kind: .error)
         }
+
+        if deliveryChannels.contains(.ntfy) {
+            if let target = ntfyTarget() {
+                targets.append(target)
+            } else {
+                attemptsByChannel[.ntfy] = DeliveryRecord.Attempt(
+                    channel: .ntfy,
+                    outcome: .failed,
+                    detail: AppText.ntfyNotConfigured
+                )
+            }
+        }
+
+        let deliveredAttempts: [DeliveryRecord.Attempt]
+        do {
+            deliveredAttempts = try await deliveryDispatcher.deliver(
+                notification,
+                to: targets
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            assertionFailure("Push dispatcher threw a non-cancellation error")
+            return
+        }
+        for attempt in deliveredAttempts {
+            attemptsByChannel[attempt.channel] = attempt
+        }
+        let attempts = PushChannel.allCases.compactMap { attemptsByChannel[$0] }
+        appendRecord(
+            for: event,
+            attempts: attempts,
+            detail: attempts.isEmpty ? AppText.noPushChannelEnabled : nil
+        )
+        presentDeliveryResult(attempts)
     }
 
     private func appendRecord(
         for event: CodexEvent,
-        outcome: DeliveryRecord.Outcome,
+        attempts: [DeliveryRecord.Attempt],
         detail: String? = nil
     ) {
         records.insert(
             DeliveryRecord(
                 eventType: event.type,
                 projectName: event.projectName,
-                outcome: outcome,
+                attempts: attempts,
                 detail: detail
             ),
             at: 0
         )
         records = Array(records.prefix(100))
         try? historyStore.save(records)
+    }
+
+    private var enabledChannels: [PushChannel] {
+        PushDeliveryRouting.eventChannels(
+            notificationsEnabled: true,
+            barkEnabled: barkEnabled,
+            ntfyEnabled: ntfyEnabled
+        )
+    }
+
+    private func barkTarget() throws -> PushDeliveryTarget {
+        let client = try BarkClient(
+            baseURL: validatedBaseURL(),
+            deviceKey: deviceKey
+        )
+        return PushDeliveryTarget(channel: .bark, provider: client)
+    }
+
+    private func ntfyTarget() -> PushDeliveryTarget? {
+        guard let configuration = ntfySettings.deliveryConfiguration else {
+            return nil
+        }
+        return PushDeliveryTarget(
+            channel: .ntfy,
+            provider: NtfyClient(
+                configuration: configuration,
+                session: ntfySession
+            )
+        )
+    }
+
+    private func presentDeliveryResult(_ attempts: [DeliveryRecord.Attempt]) {
+        let status = DeliveryRecord.aggregateStatus(for: attempts)
+        let sentCount = attempts.count { $0.outcome == .sent }
+
+        switch status {
+        case .sent:
+            showNotice(
+                sentCount == 1
+                    ? AppText.notificationSent
+                    : AppText.notificationsSent(sentCount),
+                kind: .success
+            )
+        case .partial:
+            showNotice(AppText.notificationPartiallySent, kind: .error)
+        case .failed, .skipped:
+            guard let detail = attempts.first(where: { $0.outcome != .sent })?.detail else {
+                return
+            }
+            showNotice(AppText.pushFailed(detail), kind: .error)
+        }
     }
 
     private func validatedBaseURL() throws -> URL {
@@ -371,13 +590,6 @@ final class AppModel: ObservableObject {
             seenEventSet.remove(removed)
         }
         return true
-    }
-
-    private func safeError(_ error: Error) -> String {
-        if let bark = error as? BarkError {
-            return bark.localizedDescription
-        }
-        return AppText.networkRequestFailed
     }
 
     func dismissNotice(id: UUID? = nil) {

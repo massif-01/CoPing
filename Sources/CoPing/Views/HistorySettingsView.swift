@@ -57,18 +57,19 @@ struct HistorySettingsView: View {
 
     private func historyRow(_ record: DeliveryRecord) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon(for: record.outcome))
+            Image(systemName: icon(for: record.aggregateStatus))
                 .font(.body.weight(.semibold))
-                .foregroundStyle(color(for: record.outcome))
+                .foregroundStyle(color(for: record.aggregateStatus))
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(eventName(record.eventType)) · \(record.projectName)")
 
-                if let detail = record.detail {
-                    Text(AppText.localizedHistoryDetail(detail))
+                if let detail = deliveryDetail(record) {
+                    Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -82,6 +83,29 @@ struct HistorySettingsView: View {
         .padding(.vertical, 9)
     }
 
+    private func deliveryDetail(_ record: DeliveryRecord) -> String? {
+        let attempts = record.effectiveAttempts
+        guard !attempts.isEmpty else {
+            return record.detail.map(AppText.localizedHistoryDetail)
+        }
+        return attempts.map { attempt in
+            let status: String
+            switch attempt.outcome {
+            case .sent:
+                status = AppText.deliverySent
+            case .failed:
+                status = AppText.deliveryFailed
+            case .skipped:
+                status = AppText.deliverySkipped
+            }
+            if let detail = attempt.detail {
+                return "\(attempt.channel.displayName)：\(status) · \(AppText.localizedHistoryDetail(detail))"
+            }
+            return "\(attempt.channel.displayName)：\(status)"
+        }
+        .joined(separator: "   ")
+    }
+
     private func eventName(_ type: CodexEvent.EventType) -> String {
         switch type {
         case .sessionStarted: AppText.connectionEvent
@@ -91,17 +115,19 @@ struct HistorySettingsView: View {
         }
     }
 
-    private func icon(for outcome: DeliveryRecord.Outcome) -> String {
-        switch outcome {
+    private func icon(for status: DeliveryRecord.AggregateStatus) -> String {
+        switch status {
         case .sent: "checkmark.circle.fill"
+        case .partial: "exclamationmark.triangle.fill"
         case .failed: "exclamationmark.circle.fill"
         case .skipped: "minus.circle.fill"
         }
     }
 
-    private func color(for outcome: DeliveryRecord.Outcome) -> Color {
-        switch outcome {
+    private func color(for status: DeliveryRecord.AggregateStatus) -> Color {
+        switch status {
         case .sent: Color(nsColor: .systemGreen)
+        case .partial: Color(nsColor: .systemOrange)
         case .failed: Color(nsColor: .systemRed)
         case .skipped: .secondary
         }

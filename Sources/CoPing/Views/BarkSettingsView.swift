@@ -9,10 +9,30 @@ struct BarkSettingsView: View {
             "Bark",
             subtitle: AppText.barkSettingsDescription,
             systemImage: "iphone.radiowaves.left.and.right",
-            imageResourceName: "BarkIcon",
             tint: .blue
         ) {
             SettingsCard {
+                SettingsRow(
+                    systemImage: "bell.fill",
+                    tint: .blue,
+                    title: AppText.enableBark,
+                    subtitle: AppText.enableBarkHelp
+                ) {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { model.barkEnabled },
+                            set: { model.setBarkEnabled($0) }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .accessibilityLabel(AppText.enableBark)
+                }
+
+                SettingsCardDivider()
+
                 SettingsRow(
                     systemImage: "server.rack",
                     tint: .blue,
@@ -55,7 +75,7 @@ struct BarkSettingsView: View {
                 .copingSecondaryButtonStyle()
 
                 Button {
-                    model.sendTestNotification()
+                    model.sendBarkTestNotification()
                 } label: {
                     Text(AppText.saveAndSendTest)
                         .foregroundStyle(.white)

@@ -69,6 +69,8 @@ struct SettingsView: View {
             GeneralSettingsView(model: model)
         case .bark:
             BarkSettingsView(model: model)
+        case .ntfy:
+            NtfySettingsView(model: model)
         case .codex:
             CodexSettingsView(model: model)
         case .history:
@@ -296,6 +298,7 @@ private final class WindowCapabilityView: NSView {
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case bark
+    case ntfy
     case codex
     case history
     case version
@@ -306,6 +309,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: AppText.generalTab
         case .bark: "Bark"
+        case .ntfy: "ntfy"
         case .codex: "Codex"
         case .history: AppText.historyTab
         case .version: AppText.versionTab
@@ -316,6 +320,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .bark: "iphone.radiowaves.left.and.right"
+        case .ntfy: "bell.badge.fill"
         case .codex: "terminal"
         case .history: "clock.arrow.circlepath"
         case .version: "arrow.triangle.2.circlepath"

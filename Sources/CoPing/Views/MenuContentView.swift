@@ -121,6 +121,15 @@ struct MenuContentView: View {
         if !model.notificationsEnabled {
             return "pause.circle.fill"
         }
+        if model.connectionStatus == .error {
+            return "xmark.circle.fill"
+        }
+        if model.records.first?.aggregateStatus == .failed {
+            return "exclamationmark.circle.fill"
+        }
+        if model.records.first?.aggregateStatus == .partial {
+            return "exclamationmark.triangle.fill"
+        }
 
         switch model.connectionStatus {
         case .connected:
@@ -133,6 +142,14 @@ struct MenuContentView: View {
     private var statusColor: Color {
         if !model.notificationsEnabled {
             return Color(nsColor: .systemYellow)
+        }
+        if model.connectionStatus == .error
+            || model.records.first?.aggregateStatus == .failed
+        {
+            return Color(nsColor: .systemRed)
+        }
+        if model.records.first?.aggregateStatus == .partial {
+            return Color(nsColor: .systemOrange)
         }
         return model.connectionStatus == .connected
             ? Color(nsColor: .systemGreen)

@@ -6,7 +6,6 @@ struct SettingsPage<Content: View>: View {
     let title: String
     let subtitle: String
     let systemImage: String
-    let imageResourceName: String?
     let tint: Color
     private let content: Content
 
@@ -14,14 +13,12 @@ struct SettingsPage<Content: View>: View {
         _ title: String,
         subtitle: String,
         systemImage: String,
-        imageResourceName: String? = nil,
         tint: Color,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage
-        self.imageResourceName = imageResourceName
         self.tint = tint
         self.content = content()
     }
@@ -33,7 +30,6 @@ struct SettingsPage<Content: View>: View {
                     title: title,
                     subtitle: subtitle,
                     systemImage: systemImage,
-                    imageResourceName: imageResourceName,
                     tint: tint
                 )
 
@@ -51,26 +47,16 @@ struct SettingsHero: View {
     let title: String
     let subtitle: String
     let systemImage: String
-    let imageResourceName: String?
     let tint: Color
 
     var body: some View {
         VStack(spacing: 7) {
-            if let resourceImage {
-                Image(nsImage: resourceImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: 54, height: 54)
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-            } else {
-                Image(systemName: systemImage)
-                    .font(.system(size: 30, weight: .medium))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(tint)
-                    .frame(width: 54, height: 54)
-                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
-            }
+            Image(systemName: systemImage)
+                .font(.system(size: 30, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
+                .frame(width: 54, height: 54)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
 
             Text(title)
                 .font(.title2.weight(.bold))
@@ -85,20 +71,6 @@ struct SettingsHero: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
         .background(SettingsCardBackground())
-    }
-
-    private var resourceImage: NSImage? {
-        guard
-            let imageResourceName,
-            let imageURL = Bundle.main.url(
-                forResource: imageResourceName,
-                withExtension: "png"
-            )
-        else {
-            return nil
-        }
-
-        return NSImage(contentsOf: imageURL)
     }
 }
 

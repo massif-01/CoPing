@@ -56,7 +56,6 @@ BIN_DIR="$(swift build -c release --disable-sandbox --package-path "$ROOT_DIR" -
   "$APP_CONTENTS/Info.plist"
 /bin/cp "$ROOT_DIR/Packaging/CoPing.icns" "$APP_RESOURCES/CoPing.icns"
 /bin/cp "$ROOT_DIR/CoPing.icon/Assets/CoPing-orbit-mark.svg" "$APP_RESOURCES/CoPing-orbit-mark.svg"
-/bin/cp "$ROOT_DIR/Sources/CoPing/Resources/BarkIcon.png" "$APP_RESOURCES/BarkIcon.png"
 /bin/cp "$ROOT_DIR/Sources/CoPing/Resources/GitHubMark.svg" "$APP_RESOURCES/GitHubMark.svg"
 /bin/chmod +x "$APP_CONTENTS/MacOS/CoPing" "$APP_CONTENTS/Helpers/CoPingHook"
 
