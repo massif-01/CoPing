@@ -51,9 +51,10 @@ Bark and ntfy are free App Store apps for receiving push notifications. You can 
 
 ### Set up Bark
 
-1. Open Bark on your iPhone and copy your Device Key.
-2. In CoPing, open Settings → Bark and paste it in.
-3. Click "Save and send test notification" — once your phone receives it, enable Bark.
+1. Open Bark on your iPhone and copy the complete push URL or Device Key.
+2. In CoPing, open Settings → Bark and paste the first address.
+3. To notify more devices, click “Add another Bark push URL” and paste each additional address.
+4. Click “Save and test all addresses.” CoPing sends to every destination independently and concurrently; once the phones receive the tests, enable Bark.
 
 On Bark's home screen, tap the marked button on the sample URL card to copy your Device Key:
 
@@ -61,7 +62,7 @@ On Bark's home screen, tap the marked button on the sample URL card to copy your
   <img src="assets/readme/copy-bark-device-key.png" width="640" alt="Where to copy the Device Key on Bark's home screen">
 </p>
 
-The default address works with the official Bark service. If you run your own Bark server, swap it with your HTTPS address.
+Entering only a Device Key uses the default server shown above. Any row can instead contain a complete push URL for the official Bark service or a self-hosted HTTPS server. One failed address does not block the others.
 
 ### Set up ntfy
 
@@ -96,14 +97,14 @@ You don't need to install the Codex CLI separately. Conversations that were alre
 - Notifications may include the task title and project name so you can tell tasks apart.
 - "Action Needed" checks locally whether Codex is waiting for you — no conversation content is saved or uploaded.
 - When you use Bark or ntfy, that service receives the final text shown on your phone.
-- Local history stores only the notification type, project name, time, and delivery result.
+- Local history stores only the notification type, project name, time, destination, and delivery result. Complete push URLs and Device Keys are not stored there.
 
 Keep your Bark Device Key and ntfy Topic private.
 
 ## Other features
 
-- Independent Bark and ntfy switches — use one or both at the same time
-- Delivery history for the latest 100 notifications, per channel
+- Multiple concurrent Bark push URLs, with Bark and ntfy available at the same time
+- Delivery history for the latest 100 notifications, per destination
 - Launch at login
 - Simplified Chinese and English
 - Check for and download updates from inside the app

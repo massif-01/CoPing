@@ -8,6 +8,10 @@ private struct TestFailure: LocalizedError, CustomStringConvertible {
     var errorDescription: String? { description }
 }
 
+private struct ReleasedSingleBarkConfiguration: Decodable {
+    let deviceKey: String
+}
+
 private func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     guard condition() else { throw TestFailure(description: message) }
 }
@@ -957,11 +961,58 @@ private func testDeviceKeyAndHistory() throws {
 
     let configurationURL = directory.appendingPathComponent("config.json")
     let deviceKeyStore = DeviceKeyStore(fileURL: configurationURL)
-    let initialKey = try deviceKeyStore.read()
-    try check(initialKey == nil, "Fresh Device Key file was not empty")
-    try deviceKeyStore.save("test-secret")
-    let savedKey = try deviceKeyStore.read()
-    try check(savedKey == "test-secret", "Device Key round trip failed")
+    let initialConfiguration = try deviceKeyStore.read()
+    try check(initialConfiguration == nil, "Fresh Bark configuration was not empty")
+
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let legacyData = try JSONSerialization.data(
+        withJSONObject: ["deviceKey": "legacy-secret"]
+    )
+    try legacyData.write(to: configurationURL, options: [.atomic])
+    let readLegacyConfiguration = try deviceKeyStore.read()
+    try check(
+        readLegacyConfiguration == .legacyDeviceKey("legacy-secret"),
+        "The released single-key configuration was not recognized"
+    )
+
+    let destinations = [
+        try BarkDestination(
+            id: UUID(),
+            baseURL: URL(string: "https://api.day.app")!,
+            deviceKey: "first-secret"
+        ),
+        try BarkDestination(
+            id: UUID(),
+            baseURL: URL(string: "https://bark.example")!,
+            deviceKey: "second-secret"
+        ),
+    ]
+    try deviceKeyStore.save(destinations)
+    let readDestinations = try deviceKeyStore.read()
+    try check(
+        readDestinations == .destinations(destinations),
+        "Multiple Bark destinations did not round trip"
+    )
+
+    let storedObject = try JSONSerialization.jsonObject(
+        with: Data(contentsOf: configurationURL)
+    ) as! [String: Any]
+    try check(
+        storedObject["version"] as? Int == DeviceKeyStore.currentVersion,
+        "The Bark configuration was not versioned"
+    )
+    try check(
+        storedObject["deviceKey"] as? String == destinations[0].deviceKey,
+        "The versioned Bark configuration did not retain its first-address downgrade mirror"
+    )
+    let releasedDecoderResult = try JSONDecoder().decode(
+        ReleasedSingleBarkConfiguration.self,
+        from: Data(contentsOf: configurationURL)
+    )
+    try check(
+        releasedDecoderResult.deviceKey == destinations[0].deviceKey,
+        "The released single-destination decoder could not read the upgraded configuration"
+    )
 
     let attributes = try FileManager.default.attributesOfItem(atPath: configurationURL.path)
     let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
@@ -1026,11 +1077,22 @@ private func testDeviceKeyAndHistory() throws {
         eventType: .questionRequested,
         projectName: "aggregate",
         attempts: [
-            DeliveryRecord.Attempt(channel: .bark, outcome: .sent),
             DeliveryRecord.Attempt(
-                channel: .ntfy,
+                channel: .bark,
+                destinationID: destinations[0].id,
+                destinationLabel: "Bark 1 · api.day.app",
+                outcome: .sent
+            ),
+            DeliveryRecord.Attempt(
+                channel: .bark,
+                destinationID: destinations[1].id,
+                destinationLabel: "Bark 2 · bark.example",
                 outcome: .failed,
                 detail: "failed"
+            ),
+            DeliveryRecord.Attempt(
+                channel: .ntfy,
+                outcome: .sent
             ),
         ]
     )
@@ -1042,7 +1104,7 @@ private func testDeviceKeyAndHistory() throws {
         aggregate.aggregateStatus == .partial,
         "A mixed channel result was not represented as partial"
     )
-    try check(aggregate.effectiveAttempts.count == 2, "An event lost a channel result")
+    try check(aggregate.effectiveAttempts.count == 3, "An event lost a destination result")
     let aggregateJSON = try String(
         decoding: JSONEncoder().encode(aggregate),
         as: UTF8.self
@@ -1051,9 +1113,153 @@ private func testDeviceKeyAndHistory() throws {
         !aggregateJSON.contains("partial"),
         "The computed partial status changed the persisted history contract"
     )
+    try check(
+        !aggregateJSON.contains("first-secret") && !aggregateJSON.contains("second-secret"),
+        "Delivery history leaked a Bark Device Key"
+    )
 
     try store.clear()
     try check(store.load().isEmpty, "History was not cleared")
+}
+
+private func testBarkSettingsCoordinator() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CoPingBarkSettings-\(UUID().uuidString)", isDirectory: true)
+    let configurationURL = directory.appendingPathComponent("config.json")
+    let suiteName = "CoPingBarkSettingsTests-\(UUID().uuidString)"
+    let defaults = try unwrap(
+        UserDefaults(suiteName: suiteName),
+        "Could not create isolated Bark defaults"
+    )
+    defer {
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try JSONSerialization.data(withJSONObject: ["deviceKey": "legacy-secret"])
+        .write(to: configurationURL, options: [.atomic])
+    defaults.set(
+        "https://api.day.app",
+        forKey: BarkSettingsCoordinator.legacyBaseURLDefaultsKey
+    )
+    defaults.set(true, forKey: BarkSettingsCoordinator.enabledDefaultsKey)
+
+    let store = DeviceKeyStore(fileURL: configurationURL)
+    var coordinator = BarkSettingsCoordinator(
+        configurationStore: store,
+        defaults: defaults
+    )
+    try check(!coordinator.configurationReadFailed, "A valid legacy Bark file failed to load")
+    try check(
+        !coordinator.configurationMigrationFailed,
+        "A writable legacy Bark file failed to migrate"
+    )
+    try check(coordinator.isEnabled, "A migrated enabled Bark destination was disabled")
+    try check(
+        coordinator.deliveryDestinations.count == 1
+            && coordinator.deliveryDestinations[0].deviceKey == "legacy-secret",
+        "The legacy Bark Device Key was not preserved"
+    )
+    guard case .destinations(let migrated)? = try store.read() else {
+        throw TestFailure(description: "The legacy Bark file was not upgraded in place")
+    }
+    try check(
+        migrated == coordinator.deliveryDestinations,
+        "The migrated Bark file changed the active destination"
+    )
+    try check(
+        defaults.string(forKey: BarkSettingsCoordinator.baseURLDefaultsKey)
+            == "https://api.day.app",
+        "Legacy Bark migration did not preserve the default server for the new UI"
+    )
+
+    let firstID = coordinator.destinationDrafts[0].id
+    coordinator.setAddressInput(
+        "https://first-bark.example/legacy-secret/example-content",
+        for: firstID
+    )
+    let secondID = coordinator.addDestination()
+    coordinator.setAddressInput(
+        "https://bark.example/second-secret/这里改成你自己的推送内容",
+        for: secondID
+    )
+    try coordinator.save()
+    try check(
+        coordinator.deliveryDestinations.count == 2,
+        "Saving a second Bark push URL did not create a second destination"
+    )
+    try check(
+        defaults.string(forKey: BarkSettingsCoordinator.baseURLDefaultsKey)
+            == "https://api.day.app",
+        "Saving a complete Bark URL changed the default server for bare Device Keys"
+    )
+    try check(
+        coordinator.deliveryDestinations[0].baseURL.absoluteString
+            == "https://first-bark.example"
+            && coordinator.deliveryDestinations[0].deviceKey == "legacy-secret",
+        "The first complete Bark push URL was not normalized"
+    )
+    try check(
+        defaults.string(forKey: BarkSettingsCoordinator.legacyBaseURLDefaultsKey)
+            == coordinator.deliveryDestinations[0].baseURL.absoluteString,
+        "The released single-destination build would not retain the first Bark destination"
+    )
+    try check(
+        coordinator.deliveryDestinations[1].baseURL.absoluteString == "https://bark.example"
+            && coordinator.deliveryDestinations[1].deviceKey == "second-secret",
+        "A complete self-hosted Bark push URL was not normalized"
+    )
+
+    let duplicateID = coordinator.addDestination()
+    coordinator.setAddressInput("https://BARK.example:443/second-secret", for: duplicateID)
+    do {
+        try coordinator.save()
+        throw TestFailure(description: "Duplicate Bark push URLs were saved")
+    } catch BarkSettingsError.invalidFields {
+        try check(
+            coordinator.validationErrors[secondID] == AppText.duplicateBarkPushAddress
+                && coordinator.validationErrors[duplicateID] == AppText.duplicateBarkPushAddress,
+            "Duplicate validation did not identify both Bark rows"
+        )
+    }
+
+    coordinator.removeDestination(id: duplicateID)
+    try check(
+        coordinator.validationErrors.isEmpty,
+        "Deleting a duplicate Bark row left a stale validation error"
+    )
+    let unsavedID = coordinator.addDestination()
+    do {
+        try coordinator.setEnabled(true)
+        throw TestFailure(description: "Bark was enabled with an unsaved blank destination")
+    } catch BarkSettingsError.configurationNotSaved {
+        // Expected.
+    }
+    coordinator.removeDestination(id: unsavedID)
+
+    coordinator.removeDestination(id: secondID)
+    try check(
+        coordinator.destinationDrafts.count == 1
+            && coordinator.deliveryDestinations.count == 2,
+        "Deleting an unsaved Bark row changed active delivery before Save"
+    )
+    try coordinator.save()
+    try check(
+        coordinator.deliveryDestinations.count == 1,
+        "Saving a deleted Bark row did not remove its active destination"
+    )
+
+    let onlyID = coordinator.destinationDrafts[0].id
+    coordinator.removeDestination(id: onlyID)
+    try check(
+        coordinator.destinationDrafts.count == 1,
+        "The final Bark input row was removable"
+    )
+
+    try coordinator.setEnabled(false)
+    try coordinator.setEnabled(true)
+    try check(coordinator.isEnabled, "A saved Bark destination could not be re-enabled")
 }
 
 private func testNtfyConfigurationStore() throws {
@@ -1275,6 +1481,23 @@ private final class LockedEvent: @unchecked Sendable {
     }
 }
 
+private final class LockedStrings: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    func append(_ value: String) {
+        lock.lock()
+        storage.append(value)
+        lock.unlock()
+    }
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+}
+
 private func testBarkClient() async throws {
     let directConfiguration = try BarkConfiguration(
         baseURLString: "https://bark.example/base",
@@ -1302,14 +1525,42 @@ private func testBarkClient() async throws {
         "Copied Bark URL did not extract the Device Key"
     )
 
-    do {
-        _ = try BarkConfiguration(
-            baseURLString: "https://api.day.app",
-            deviceKeyInput: "https://example.com/not-a-bark-key"
-        )
-        throw TestFailure(description: "Unrecognized full URL was accepted as a Device Key")
-    } catch BarkError.invalidDeviceKey {
-        // Expected.
+    let selfHostedURLConfiguration = try BarkConfiguration(
+        baseURLString: "https://api.day.app",
+        deviceKeyInput: "https://example.com/self-hosted-key/example-content"
+    )
+    try check(
+        selfHostedURLConfiguration.baseURL.absoluteString == "https://example.com"
+            && selfHostedURLConfiguration.deviceKey == "self-hosted-key",
+        "A complete self-hosted Bark push URL was not accepted"
+    )
+
+    let selfHostedPathConfiguration = try BarkConfiguration(
+        baseURLString: "https://bark.example/base",
+        deviceKeyInput: "https://bark.example/base/path-key/example-content"
+    )
+    try check(
+        selfHostedPathConfiguration.baseURL.absoluteString == "https://bark.example/base"
+            && selfHostedPathConfiguration.deviceKey == "path-key",
+        "A Bark push URL did not preserve its configured self-hosted base path"
+    )
+
+    for invalidPushURL in [
+        "http://example.com/insecure-key",
+        "https://user@example.com/device-key",
+        "https://example.com/device-key?token=secret",
+        "https://example.com/device-key#fragment",
+        "https://example.com",
+    ] {
+        do {
+            _ = try BarkConfiguration(
+                baseURLString: "https://api.day.app",
+                deviceKeyInput: invalidPushURL
+            )
+            throw TestFailure(description: "An unsafe or incomplete Bark push URL was accepted")
+        } catch BarkError.invalidDeviceKey {
+            // Expected.
+        }
     }
 
     do {
@@ -1368,6 +1619,50 @@ private func testBarkClient() async throws {
         session: session
     )
     try await client.send(PushNotification(title: "Title", body: "Body"))
+
+    let receivedDeviceKeys = LockedStrings()
+    URLProtocolStub.handler = { request in
+        let body = try bodyData(from: request)
+        guard
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+            let deviceKey = json["device_key"] as? String
+        else {
+            throw TestFailure(description: "A concurrent Bark request omitted its Device Key")
+        }
+        receivedDeviceKeys.append(deviceKey)
+        return (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!,
+            Data(#"{"code":200}"#.utf8)
+        )
+    }
+    let firstClient = try BarkClient(
+        baseURL: URL(string: "https://api.day.app")!,
+        deviceKey: "first-real-request",
+        session: session
+    )
+    let secondClient = try BarkClient(
+        baseURL: URL(string: "https://bark.example")!,
+        deviceKey: "second-real-request",
+        session: session
+    )
+    let independentRequestAttempts = try await PushDeliveryDispatcher(retryDelays: []).deliver(
+        PushNotification(title: "Multi", body: "Bark"),
+        to: [
+            PushDeliveryTarget(channel: .bark, provider: firstClient),
+            PushDeliveryTarget(channel: .bark, provider: secondClient),
+        ]
+    )
+    try check(
+        independentRequestAttempts.map(\.outcome) == [.sent, .sent]
+            && receivedDeviceKeys.values.sorted()
+                == ["first-real-request", "second-real-request"],
+        "Two Bark destinations did not issue two independent JSON requests"
+    )
 
     URLProtocolStub.handler = { request in
         (
@@ -1770,6 +2065,61 @@ private func testPushDeliveryDispatcher() async throws {
         "Concurrent delivery did not preserve successful outcomes"
     )
 
+    let firstBarkID = UUID()
+    let secondBarkID = UUID()
+    let sameChannelTracker = ConcurrencyTracker()
+    let sameChannelAttempts = try await dispatcher.deliver(
+        notification,
+        to: [
+            PushDeliveryTarget(
+                channel: .bark,
+                destinationID: firstBarkID,
+                destinationLabel: "Bark 1 · api.day.app",
+                provider: DelayedPushProvider(tracker: sameChannelTracker)
+            ),
+            PushDeliveryTarget(
+                channel: .bark,
+                destinationID: secondBarkID,
+                destinationLabel: "Bark 2 · bark.example",
+                provider: DelayedPushProvider(tracker: sameChannelTracker)
+            ),
+        ]
+    )
+    let sameChannelMaximum = await sameChannelTracker.maximum
+    try check(
+        sameChannelMaximum == 2,
+        "Two Bark destinations were not sent concurrently"
+    )
+    try check(
+        sameChannelAttempts.map(\.destinationID) == [firstBarkID, secondBarkID]
+            && sameChannelAttempts.map(\.destinationLabel)
+                == ["Bark 1 · api.day.app", "Bark 2 · bark.example"],
+        "Concurrent Bark delivery lost or reordered destination identities"
+    )
+
+    let partialBarkAttempts = try await dispatcher.deliver(
+        notification,
+        to: [
+            PushDeliveryTarget(
+                channel: .bark,
+                destinationID: firstBarkID,
+                destinationLabel: "Bark 1 · api.day.app",
+                provider: ScriptedPushProvider([.success])
+            ),
+            PushDeliveryTarget(
+                channel: .bark,
+                destinationID: secondBarkID,
+                destinationLabel: "Bark 2 · bark.example",
+                provider: ScriptedPushProvider([.permanentFailure])
+            ),
+        ]
+    )
+    try check(
+        partialBarkAttempts.map(\.outcome) == [.sent, .failed]
+            && DeliveryRecord.aggregateStatus(for: partialBarkAttempts) == .partial,
+        "One failed Bark destination blocked or hid another successful destination"
+    )
+
     let allFailed = try await dispatcher.deliver(
         notification,
         to: [
@@ -1868,6 +2218,18 @@ private func testPushDeliveryDispatcher() async throws {
 }
 
 private func testLanguageResolution() throws {
+    let defaults = UserDefaults.standard
+    let previousLanguagePreference = defaults.object(
+        forKey: AppLanguagePreference.defaultsKey
+    )
+    defer {
+        if let previousLanguagePreference {
+            defaults.set(previousLanguagePreference, forKey: AppLanguagePreference.defaultsKey)
+        } else {
+            defaults.removeObject(forKey: AppLanguagePreference.defaultsKey)
+        }
+    }
+
     for language in ["zh", "zh-Hans", "zh-CN", "zh-Hant", "zh-TW", "zh-HK", "zh_MO"] {
         try check(
             AppLanguage.resolve(preferredLanguages: [language]) == .simplifiedChinese,
@@ -1902,6 +2264,27 @@ private func testLanguageResolution() throws {
     try check(
         AppLanguagePreference.english.resolve(preferredLanguages: ["zh-CN"]) == .english,
         "Manual English did not override the system language"
+    )
+
+    defaults.set(
+        AppLanguagePreference.simplifiedChinese.rawValue,
+        forKey: AppLanguagePreference.defaultsKey
+    )
+    try check(
+        AppText.barkPushAddress(2) == "Bark 推送地址 2"
+            && AppText.addMoreBarkPushAddresses == "添加更多 Bark 推送地址"
+            && AppText.notificationsPartiallySent(sent: 1, total: 2).contains("1/2"),
+        "The multiple-Bark controls were not localized in Simplified Chinese"
+    )
+    defaults.set(
+        AppLanguagePreference.english.rawValue,
+        forKey: AppLanguagePreference.defaultsKey
+    )
+    try check(
+        AppText.barkPushAddress(2) == "Bark push URL 2"
+            && AppText.addMoreBarkPushAddresses == "Add another Bark push URL"
+            && AppText.notificationsPartiallySent(sent: 1, total: 2).contains("1/2"),
+        "The multiple-Bark controls were not localized in English"
     )
     try check(
         AppText.completedNotificationBody(language: .simplifiedChinese)
@@ -2454,6 +2837,7 @@ private struct CoPingSelfTests {
             try testHookConfiguration()
             try testSocketRoundTrip()
             try testDeviceKeyAndHistory()
+            try testBarkSettingsCoordinator()
             try testNtfyConfigurationStore()
             try testNtfySettingsCoordinator()
             try testSemanticVersionAndChecksum()

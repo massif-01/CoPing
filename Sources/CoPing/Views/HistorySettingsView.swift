@@ -99,9 +99,9 @@ struct HistorySettingsView: View {
                 status = AppText.deliverySkipped
             }
             if let detail = attempt.detail {
-                return "\(attempt.channel.displayName)：\(status) · \(AppText.localizedHistoryDetail(detail))"
+                return "\(attempt.displayName)：\(status) · \(AppText.localizedHistoryDetail(detail))"
             }
-            return "\(attempt.channel.displayName)：\(status)"
+            return "\(attempt.displayName)：\(status)"
         }
         .joined(separator: "   ")
     }

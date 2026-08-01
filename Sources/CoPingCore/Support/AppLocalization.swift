@@ -86,8 +86,8 @@ public enum AppText {
 
     public static var invalidPublicBarkBaseURL: String {
         text(
-            "公共 Bark 服务地址只能填写 https://api.day.app；完整推送地址请粘贴到 Device Key 一栏。",
-            "The public Bark server address must be https://api.day.app. Paste the full push URL into the Device Key field."
+            "公共 Bark 服务地址只能填写 https://api.day.app；完整推送地址请粘贴到 Bark 推送地址输入框。",
+            "The public Bark server address must be https://api.day.app. Paste the full URL into a Bark push URL field."
         )
     }
 
@@ -102,6 +102,34 @@ public enum AppText {
         text(
             "无法读取本地 Bark 配置，原文件未被修改。请检查配置文件后重试。",
             "Unable to read the local Bark configuration. The original file was not modified. Check the configuration file and try again."
+        )
+    }
+
+    public static var barkConfigurationMigrationFailed: String {
+        text(
+            "现有 Bark 地址已载入，但无法写入新版配置；本次运行仍会使用原地址。",
+            "The existing Bark address was loaded, but the upgraded configuration could not be saved. This run will continue using the original address."
+        )
+    }
+
+    public static var invalidBarkSettings: String {
+        text(
+            "部分 Bark 推送地址无效，请检查标出的输入项。",
+            "Some Bark push URLs are invalid. Check the highlighted fields."
+        )
+    }
+
+    public static var duplicateBarkPushAddress: String {
+        text(
+            "这个 Bark 推送地址重复了。",
+            "This Bark push URL is duplicated."
+        )
+    }
+
+    public static var barkSettingsNotSaved: String {
+        text(
+            "请先保存当前 Bark 配置，再启用 Bark。",
+            "Save the current Bark settings before enabling Bark."
         )
     }
 
@@ -557,9 +585,24 @@ public enum AppText {
     }
     public static var deviceKeyHelp: String {
         text(
-            "在 iPhone 上打开 Bark，点击示例通知右侧的复制按钮，再把复制的完整地址粘贴到这里。CoPing 会自动完成设置。",
-            "On your iPhone, open Bark, tap the copy button next to an example notification, then paste the full URL here. CoPing will finish the setup automatically."
+            "可粘贴 Bark 完整 HTTPS 推送地址；只填写 Device Key 时，将使用上面的服务器地址。",
+            "Paste a complete Bark HTTPS push URL, or enter only a Device Key to use the server above."
         )
+    }
+    public static func barkPushAddress(_ index: Int) -> String {
+        text("Bark 推送地址 \(index)", "Bark push URL \(index)")
+    }
+    public static var addMoreBarkPushAddresses: String {
+        text("添加更多 Bark 推送地址", "Add another Bark push URL")
+    }
+    public static var addMoreBarkPushAddressesHelp: String {
+        text(
+            "每个地址都会独立并发推送。",
+            "Each address receives an independent concurrent push."
+        )
+    }
+    public static func removeBarkPushAddress(_ index: Int) -> String {
+        text("删除 Bark 推送地址 \(index)", "Remove Bark push URL \(index)")
     }
     public static var enableBark: String {
         text("启用 Bark", "Enable Bark")
@@ -606,6 +649,9 @@ public enum AppText {
     public static var save: String { text("保存", "Save") }
     public static var saveAndSendTest: String {
         text("保存并发送测试通知", "Save and send test notification")
+    }
+    public static var saveAndTestAllBarkAddresses: String {
+        text("保存并测试全部地址", "Save and test all addresses")
     }
     public static var detected: String { text("已检测到", "Detected") }
     public static var notDetected: String { text("未检测到", "Not detected") }
@@ -655,8 +701,8 @@ public enum AppText {
     }
     public static var historyPrivacyHelp: String {
         text(
-            "这里只记录事件类型、项目名和发送结果。",
-            "Only the event type, project name, and delivery result are recorded."
+            "这里只记录事件类型、项目名、推送目标和发送结果，不记录完整推送地址或 Device Key。",
+            "Only the event type, project name, destination, and result are recorded. Complete push URLs and Device Keys are not stored here."
         )
     }
     public static var historyLimit: String {
@@ -738,14 +784,14 @@ public enum AppText {
     }
     public static func notificationsSent(_ count: Int) -> String {
         text(
-            "通知已发送到 \(count) 个通道。",
-            "Notification sent to \(count) channels."
+            "通知已发送到 \(count) 个推送目标。",
+            "Notification sent to \(count) destinations."
         )
     }
-    public static var notificationPartiallySent: String {
+    public static func notificationsPartiallySent(sent: Int, total: Int) -> String {
         text(
-            "通知仅发送到部分通道，请查看发送记录。",
-            "Notification reached only some channels. Check delivery history."
+            "通知已发送到 \(sent)/\(total) 个推送目标，请查看发送记录。",
+            "Notification reached \(sent)/\(total) destinations. Check delivery history."
         )
     }
     public static func pushFailed(_ detail: String) -> String {

@@ -29,17 +29,27 @@ public struct DeliveryRecord: Codable, Identifiable, Equatable, Sendable {
 
     public struct Attempt: Codable, Equatable, Sendable {
         public let channel: PushChannel
+        public let destinationID: UUID?
+        public let destinationLabel: String?
         public let outcome: Outcome
         public let detail: String?
 
         public init(
             channel: PushChannel,
+            destinationID: UUID? = nil,
+            destinationLabel: String? = nil,
             outcome: Outcome,
             detail: String? = nil
         ) {
             self.channel = channel
+            self.destinationID = destinationID
+            self.destinationLabel = destinationLabel
             self.outcome = outcome
             self.detail = detail
+        }
+
+        public var displayName: String {
+            destinationLabel ?? channel.displayName
         }
     }
 
@@ -108,9 +118,9 @@ public struct DeliveryRecord: Codable, Identifiable, Equatable, Sendable {
         ]
     }
 
-    /// A non-persisted view of the per-channel results. Keeping `outcome` in
+    /// A non-persisted view of the per-destination results. Keeping `outcome` in
     /// its original three-value format preserves history compatibility while
-    /// allowing mixed channel results to be represented accurately.
+    /// allowing mixed destination results to be represented accurately.
     public var aggregateStatus: AggregateStatus {
         Self.aggregateStatus(for: effectiveAttempts, fallback: outcome)
     }

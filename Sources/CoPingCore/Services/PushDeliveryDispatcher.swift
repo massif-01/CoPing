@@ -23,10 +23,19 @@ public protocol PushRetryClassifyingError: Error {
 
 public struct PushDeliveryTarget: Sendable {
     public let channel: PushChannel
+    public let destinationID: UUID?
+    public let destinationLabel: String?
     public let provider: any PushProvider
 
-    public init(channel: PushChannel, provider: any PushProvider) {
+    public init(
+        channel: PushChannel,
+        destinationID: UUID? = nil,
+        destinationLabel: String? = nil,
+        provider: any PushProvider
+    ) {
         self.channel = channel
+        self.destinationID = destinationID
+        self.destinationLabel = destinationLabel
         self.provider = provider
     }
 }
@@ -79,6 +88,8 @@ public struct PushDeliveryDispatcher: Sendable {
                 try Task.checkCancellation()
                 return DeliveryRecord.Attempt(
                     channel: target.channel,
+                    destinationID: target.destinationID,
+                    destinationLabel: target.destinationLabel,
                     outcome: .sent
                 )
             } catch {
@@ -91,6 +102,8 @@ public struct PushDeliveryDispatcher: Sendable {
                 else {
                     return DeliveryRecord.Attempt(
                         channel: target.channel,
+                        destinationID: target.destinationID,
+                        destinationLabel: target.destinationLabel,
                         outcome: .failed,
                         detail: safeError(error)
                     )
