@@ -8,8 +8,8 @@ CoPing is a macOS menu bar app. Let Codex run on your Mac while you go do someth
 
 ## What you'll be notified about
 
-- **Task complete:** Codex finished — you'll know right away.
-- **Waiting for an answer:** Codex has a question and needs your reply.
+- **Completion candidate:** The legacy Stop notification remains. It may fire before another Hook requests continuation; reliable terminal detection is not yet implemented.
+- **Question to review:** Each call is tracked separately. Unknown and asynchronous questions do not imply the task is paused.
 - **Waiting for approval:** Choose how you want to be notified.
 
 Approval notifications have three options:
@@ -24,7 +24,7 @@ Approval notifications have three options:
 
 > Task-complete and question notifications are not affected by this setting.
 >
-> CoPing sends notifications. It does not currently let you approve or reply to Codex from your phone.
+> CoPing is notification-only. It does not provide phone replies, remote execution, or remote approval.
 
 ## What you need
 
@@ -86,15 +86,25 @@ Your Topic acts like a password for this notification channel — don't share it
 1. In CoPing, open Settings → Codex and click "Connect Codex."
 2. CoPing opens a terminal window. At the prompt, type `/hooks` and press Return.
 3. Find `CoPingHook` in the list and select "Trust all."
-4. Type `/quit` and close the terminal — you're done.
+4. Type `/quit`, close the terminal, and verify a real Hook in a dedicated task without sensitive content. Opening review or testing a push channel does not verify every Codex event.
 
 You don't need to install the Codex CLI separately. Conversations that were already open before connecting may not pick up the hooks right away; starting a new Codex task will sort it out.
+
+## 0.2.0 compatibility update
+
+- Settings → Codex → Advanced Settings & Diagnostics shows the host, Codex Home, observed Hooks and approval state-message version. Disconnect before selecting a custom App/Home. The default Home uses the app process's `CODEX_HOME`, otherwise `~/.codex`; Finder is not assumed to inherit your shell environment.
+- The default pairs `PreToolUse` and `PostToolUse` for the legacy question tool, resolving waits by native call ID. Unknown older hosts still require isolated validation of this minimum contract. If newer question cards produce no reminder, enable the newer question-card option in advanced settings and reconnect; it is off by default.
+- Different calls in one turn keep separate timers. A known call ending cancels its unsent reminder. Async Pre alone does not notify; `accepted: true` means the question was presented, not answered. Ordinary Stop does not cancel it. A group of questions produces one generic reminder without question/answer text.
+- Approval decoding still accepts only version **11**. Unknown formats, missing critical fields and unavailable monitoring trigger conservative notifications for received approvals. This is not evidence that the current desktop changed its message version.
+- Pause/disconnect cancels pending work. Requests already dispatched to a remote service cannot be recalled. Old Helper events remain receivable but cannot verify a newly selected source; titles are not queried from an unconfirmed Home.
+
+Local builds and synthetic tests are separate from real desktop compatibility. Version 11 was observed on ChatGPT.app 26.917.71314; the user confirmed ntfy phone receipt, repeated questions and basic pause/resume behavior. Reliable root completion, Interrupt/subagent identity, real human approval and the async-answer cancellation contract remain unverified. See the [verification report](docs/compatibility-verification.md) and [upgrade/rollback guide](docs/upgrade-and-rollback.md).
 
 ## Privacy
 
 - No account required. CoPing has no relay server of its own.
-- Your prompts, replies, commands, and full file paths are never sent through CoPing's notification channels.
-- Notifications may include the task title and project name so you can tell tasks apart.
+- CoPing does not directly forward question/answer bodies, tool commands or full file paths; task titles may contain text you entered.
+- Notifications may include the task title and project name, which can themselves be sensitive.
 - "Action Needed" checks locally whether Codex is waiting for you — no conversation content is saved or uploaded.
 - When you use Bark or ntfy, that service receives the final text shown on your phone.
 - Local history stores only the notification type, project name, time, destination, and delivery result. Complete push URLs and Device Keys are not stored there.

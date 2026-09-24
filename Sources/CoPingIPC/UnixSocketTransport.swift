@@ -22,19 +22,16 @@ public final class UnixSocketServer: @unchecked Sendable {
     private let path: String
     private let queue: DispatchQueue
     private let handler: EventHandler
-    private let eventIDProvider: @Sendable () -> String
     private var descriptor: Int32 = -1
     private var source: DispatchSourceRead?
 
     public init(
         path: String = defaultSocketPath(),
         queue: DispatchQueue = DispatchQueue(label: "com.coping.socket"),
-        eventIDProvider: @escaping @Sendable () -> String = { UUID().uuidString },
         handler: @escaping EventHandler
     ) {
         self.path = path
         self.queue = queue
-        self.eventIDProvider = eventIDProvider
         self.handler = handler
     }
 
@@ -92,6 +89,8 @@ public final class UnixSocketServer: @unchecked Sendable {
         guard client >= 0 else { return }
         defer { close(client) }
 
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout)))
         var collected = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
         while collected.count <= 16_384 {
@@ -108,9 +107,9 @@ public final class UnixSocketServer: @unchecked Sendable {
             )
             return
         }
-        let event = decoded.addingEventIDIfMissing(eventIDProvider())
+        let event = decoded.addingEventIDIfMissing()
         hookSocketLogger.info(
-            "Received \(event.type.rawValue, privacy: .public) session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public)"
+            "Received \(event.type.rawValue, privacy: .public) session=\(event.sessionID, privacy: .private) turn=\(event.turnID ?? "-", privacy: .private)"
         )
         handler(event)
     }

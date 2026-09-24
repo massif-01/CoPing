@@ -1,6 +1,7 @@
 import CoPingCore
 import CoPingAppSupport
 import Foundation
+import Darwin
 import SQLite3
 
 private struct TestFailure: LocalizedError, CustomStringConvertible {
@@ -12,8 +13,8 @@ private struct ReleasedSingleBarkConfiguration: Decodable {
     let deviceKey: String
 }
 
-private func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
-    guard condition() else { throw TestFailure(description: message) }
+private func check(_ condition: @autoclosure () throws -> Bool, _ message: String) throws {
+    guard try condition() else { throw TestFailure(description: message) }
 }
 
 private func testPayloadSanitizer() throws {
@@ -199,12 +200,12 @@ private func testApprovalNotificationMode() throws {
     )
     try check(
         AppText.approvalStateUnavailable(language: .simplifiedChinese)
-            == "暂时无法判断 Codex 是否会自动处理，当前会提醒所有审批。",
+            == "精确过滤暂不可用，已收到的审批将采用保守提醒。",
         "Chinese unavailable-state explanation changed"
     )
     try check(
         AppText.approvalStateUnavailable(language: .english)
-            == "CoPing temporarily cannot tell whether Codex will handle an approval, so all approvals will be notified.",
+            == "Precise filtering is unavailable. Received approvals will use conservative notifications.",
         "English unavailable-state explanation changed"
     )
     try check(
@@ -626,6 +627,8 @@ private func testCodexApprovalNotificationCoordinator() throws {
                 && coordinator.pendingEvents.isEmpty,
             "\(status) incorrectly implied that the user must approve"
         )
+        try check(notificationCauses(coordinator.receive(waiting(true), now: baseDate)) == [.requiresUserAction],
+                  "A05 review terminal suppressed subsequent manual wait")
     }
 
     var waitingAfterHook = CodexApprovalNotificationCoordinator()
@@ -686,7 +689,8 @@ private func testCodexApprovalNotificationCoordinator() throws {
 
     var unavailable = CodexApprovalNotificationCoordinator()
     let unknownEvent = event("unknown")
-    _ = unavailable.monitorHealthChanged(.unavailable)
+    try check(unavailable.monitorHealthChanged(.unavailable).isEmpty,
+              "A07 health failure invented a notification without an event")
     _ = unavailable.receive(unknownEvent)
     let fallbackEffects = unavailable.unknownFallbackFired(
         key: unknownEvent.uniqueKey
@@ -911,6 +915,7 @@ private func testSocketRoundTrip() throws {
         type: .completed,
         sessionID: "session",
         turnID: "turn",
+        eventID: "event-A",
         projectName: "project"
     )
     let received = LockedEvent()
@@ -920,6 +925,10 @@ private func testSocketRoundTrip() throws {
     }
     try server.start()
     defer { server.stop() }
+    do {
+        try UnixSocketClient.send(expected, path: "/tmp/coping-absent-\(UUID()).sock")
+        throw TestFailure(description: "M14 missing receiver succeeded")
+    } catch UnixSocketError.connectFailed { }
     try UnixSocketClient.send(expected, path: path)
     try check(semaphore.wait(timeout: .now() + 1) == .success, "Socket event timed out")
     try check(received.value == expected, "Socket event changed in transit")
@@ -928,8 +937,7 @@ private func testSocketRoundTrip() throws {
     let legacySemaphore = DispatchSemaphore(value: 0)
     let legacyReceived = LockedEvent()
     let legacyServer = UnixSocketServer(
-        path: legacyPath,
-        eventIDProvider: { "normalized-event-id" }
+        path: legacyPath
     ) {
         legacyReceived.value = $0
         legacySemaphore.signal()
@@ -949,8 +957,8 @@ private func testSocketRoundTrip() throws {
         "Legacy permission event timed out"
     )
     try check(
-        legacyReceived.value?.eventID == "normalized-event-id",
-        "An installed legacy Hook event was not assigned a unique local ID"
+        legacyReceived.value == legacyPermission.addingEventIDIfMissing(),
+        "An installed legacy Hook event was not assigned a stable wire ID"
     )
 }
 
@@ -2322,14 +2330,14 @@ private func testLanguageResolution() throws {
     )
     try check(
         AppText.questionNotificationBody(language: .simplifiedChinese)
-            == "Codex 等待回答",
+            == "Codex 有问题待查看",
         "Chinese question body should identify the required action"
     )
     try check(
         AppText.questionNotificationBody(
             taskTitle: "让推送显示对话名称",
             language: .simplifiedChinese
-        ) == "Codex [让推送显示对话名...] 等待回答",
+        ) == "Codex [让推送显示对话名...] 有问题待查看",
         "Chinese question body did not include the task title"
     )
     try check(
@@ -2350,14 +2358,14 @@ private func testLanguageResolution() throws {
         AppText.questionNotificationBody(
             taskTitle: "1234567890ABCDEFG",
             language: .english
-        ) == "Codex [1234567890ABCDEF...] is waiting for an answer",
+        ) == "Codex [1234567890ABCDEF...] has a question to review",
         "A long English task title was not limited to sixteen characters"
     )
     try check(
         AppText.questionNotificationBody(
             taskTitle: "中文ABCD混合任务名",
             language: .simplifiedChinese
-        ) == "Codex [中文ABCD混合任务...] 等待回答",
+        ) == "Codex [中文ABCD混合任务...] 有问题待查看",
         "A mixed-language task title did not use its displayed width"
     )
     try check(
@@ -2369,7 +2377,7 @@ private func testLanguageResolution() throws {
     )
     try check(
         AppText.questionNotificationBody(language: .english)
-            == "Codex is waiting for an answer",
+            == "Codex has a question to review",
         "English question body should identify the required action"
     )
 
@@ -2822,10 +2830,246 @@ private final class URLProtocolStub: URLProtocol {
     override func stopLoading() {}
 }
 
+// Synthetic contract fixtures based on rust-v0.156.1; never captured conversations.
+private func testQuestionLifecycleCompatibility() throws {
+    func hook(_ name: String = "PreToolUse", tool: String = "request_user_input",
+              call: String? = "call-A", turn: String? = "turn-A", response: Any? = nil) throws -> CodexEvent {
+        var input: [String: Any] = ["hook_event_name": name, "session_id": "session-A",
+                                    "tool_name": tool, "tool_input": ["questions": ["secret-question", "secret-question-2"]]]
+        input["tool_use_id"] = call
+        input["turn_id"] = turn
+        input["tool_response"] = response
+        return try HookPayloadSanitizer.sanitize(JSONSerialization.data(withJSONObject: input),
+                                                now: Date(timeIntervalSince1970: 10))
+    }
+    let a = try hook(), b = try hook(call: "call-B")
+    try check(a.identityQuality == .strong && a.questionMode == .unknown, "Q12 tool name implied blocking")
+    try check(a.uniqueKey != b.uniqueKey && a.uniqueKey == (try hook()).uniqueKey, "Q02/Q03 call identity")
+    var state = CodexQuestionCoordinator()
+    let requested = state.receive(a)
+    try check(requested.count == 1 && state.receive(a).isEmpty, "Q03 duplicate request")
+    _ = state.receive(b)
+    try check(state.pendingCount == 2, "Q02 lost second call")
+    let ended = try hook("PostToolUse", response: "{\"answers\":{}}")
+    try check(ended.phase == .resolved && ended.uniqueKey != a.uniqueKey, "Q03 phase identity")
+    _ = state.receive(ended)
+    try check(state.pendingCount == 1 && state.receive(a).isEmpty, "Q05/Q06/Q07 cancellation tombstone")
+    if case let .schedule(key) = requested[0] {
+        try check(state.take(key) == nil, "Q15 cancelled timer was eligible")
+    }
+    var reverse = CodexQuestionCoordinator()
+    _ = reverse.receive(ended)
+    try check(reverse.receive(a).isEmpty, "Q07 late request revived")
+    let asyncPre = try hook(tool: "request_user_input_async", call: "call-C")
+    let accepted = try hook("PostToolUse", tool: "request_user_input_async", call: "call-C",
+                            response: "{\"accepted\":true}")
+    try check(state.receive(asyncPre).isEmpty && state.candidateCount == 1, "Q08 premature async reminder")
+    try check(state.receive(accepted).count == 1 && state.pendingCount == 2, "Q08 accepted treated as answer")
+    _ = state.receive(try hook("Stop"))
+    try check(state.pendingCount == 2, "Q09 Stop cancelled question")
+    try check(state.receive(accepted).isEmpty, "Q03 duplicate accepted")
+    _ = state.reset()
+    try check(state.pendingCount == 0 && state.receive(accepted).isEmpty, "M11 reset replayed old question")
+    let weakA = try hook(call: nil, turn: nil), weakB = try hook(call: nil, turn: nil)
+    try check(weakA.identityQuality == .weak && weakA.uniqueKey != weakB.uniqueKey, "Q11 weak calls merged")
+    var weak = CodexQuestionCoordinator()
+    _ = weak.receive(weakA); _ = weak.receive(weakB)
+    _ = weak.receive(try hook("PostToolUse", call: nil, turn: nil, response: ["answers": [:]]))
+    try check(weak.pendingCount == 2, "Q11 weak end cleared session")
+    let collisionA = CodexEvent(type: .questionRequested, sessionID: "a:b", turnID: "c", eventID: "d", projectName: "x")
+    let collisionB = CodexEvent(type: .questionRequested, sessionID: "a", turnID: "b:c", eventID: "d", projectName: "x")
+    try check(collisionA.uniqueKey != collisionB.uniqueKey, "Delimiter collision")
+    for tool in ["send_message_to_user_async", "progress"] {
+        do { _ = try hook(tool: tool); throw TestFailure(description: "Q10 free text accepted") }
+        catch HookPayloadError.unsupportedEvent {}
+    }
+    for response in [false, 1, "true", NSNull()] as [Any] {
+        do {
+            _ = try hook("PostToolUse", tool: "request_user_input_async", response: ["accepted": response])
+            throw TestFailure(description: "Q14 invalid accepted type")
+        } catch HookPayloadError.unsupportedEvent {}
+    }
+    let wire = try JSONEncoder().encode(accepted)
+    try check(!String(decoding: wire, as: UTF8.self).contains("secret-question"), "Q04/Q14 content leak")
+    let newRoundTrip = try JSONDecoder().decode(CodexEvent.self, from: wire)
+    try check(newRoundTrip == accepted, "M06 new Helper wire")
+    let oldWire = Data("{\"version\":1,\"type\":\"questionRequested\",\"sessionID\":\"session-A\",\"projectName\":\"test\",\"timestamp\":0}".utf8)
+    let old = try JSONDecoder().decode(CodexEvent.self, from: oldWire).addingEventIDIfMissing()
+    try check(old.verifiesConnection && old.identityQuality == .weak && old.eventID?.hasPrefix("legacy-wire:") == true, "M06 old Helper wire")
+    var bounded = CodexQuestionCoordinator()
+    for index in 0..<250 { _ = bounded.receive(try hook(call: "call-\(index)")) }
+    try check(bounded.pendingCount == 200, "Q07 unbounded pending cache")
+    print("Compatibility Q01-Q11/Q14-Q15 + M06/M11 synthetic: PASS")
+}
+
+private func testCompatibilityMigration() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CoPingMigration-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let helper = directory.appendingPathComponent("helper '$HOME`echo injection` file")
+    try Data().write(to: helper)
+    let hooks = directory.appendingPathComponent("hooks.json")
+    let legacyCommand = "\"" + helper.path.replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    let thirdParty: [String: Any] = ["type": "command", "command": "foreign", "custom": ["keep": true]]
+    let root: [String: Any] = ["extra": ["keep": "yes"], "hooks": ["PreToolUse": [["matcher": "^request_user_input$", "hooks": [["type": "command", "command": legacyCommand], thirdParty]]]]]
+    try JSONSerialization.data(withJSONObject: root).write(to: hooks)
+    let legacy = HookConfigurationManager(hooksURL: hooks, helperURL: helper, sourceID: "source-A")
+    _ = try legacy.installConfiguration()
+    var installed = try castHooks(castRoot(Data(contentsOf: hooks)))
+    try check((installed["PostToolUse"] as? [[String: Any]])?.first?["matcher"] as? String == "^request_user_input$", "R1 default legacy lifecycle is not closed")
+    let manager = HookConfigurationManager(hooksURL: hooks, helperURL: helper, sourceID: "source-A", verifiedToolLifecycle: true)
+    _ = try manager.installConfiguration()
+    try check(manager.isInstalled(), "M03 definitions not recognized")
+    let previous = try Data(contentsOf: hooks)
+    let noBackup = try manager.installConfiguration()
+    try check(noBackup == nil && previous == (try Data(contentsOf: hooks)), "M03 non-idempotent migration")
+    installed = try castHooks(castRoot(previous))
+    try check(installed["PostToolUse"] != nil, "Q02 missing lifecycle subscription")
+    var wrongRoot = try castRoot(previous)
+    var wrongHooks = try castHooks(wrongRoot)
+    var wrongGroups = wrongHooks["PostToolUse"] as! [[String: Any]]
+    wrongGroups[0]["matcher"] = "Bash"
+    wrongHooks["PostToolUse"] = wrongGroups
+    wrongRoot["hooks"] = wrongHooks
+    try JSONSerialization.data(withJSONObject: wrongRoot).write(to: hooks)
+    try check(!manager.isInstalled(), "M03 ignored wrong matcher")
+    try previous.write(to: hooks)
+    // Execute ONLY a printf in a temporary shell, never the helper/path contents.
+    let process = Process(), pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-c", "printf '%s' " + shellQuote(helper.path)]
+    process.standardOutput = pipe
+    try process.run(); process.waitUntilExit()
+    let quoted = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    try check(process.terminationStatus == 0 && quoted == helper.path, "M05 unsafe shell path")
+    let concurrent = Data("{\"hooks\":{},\"newEdit\":true}".utf8)
+    let racing = HookConfigurationManager(hooksURL: hooks, helperURL: helper, beforeCommit: {
+        try concurrent.write(to: hooks)
+    })
+    do { _ = try racing.installConfiguration(); throw TestFailure(description: "M04 missed conflict") }
+    catch HookConfigurationError.concurrentModification {}
+    try check(try Data(contentsOf: hooks) == concurrent, "M04 overwrote concurrent edit")
+    try previous.write(to: hooks)
+    try manager.uninstallConfiguration()
+    let retained = try castRoot(Data(contentsOf: hooks))
+    try check(retained["extra"] is [String: Any], "M02 lost root field")
+    let retainedHooks = try castHooks(retained)
+    let groups = retainedHooks["PreToolUse"] as? [[String: Any]] ?? []
+    try check(groups.count == 1 && (groups[0]["hooks"] as? [[String: Any]])?.count == 1, "M02 lost foreign handler")
+    let custom = CodexConnectionSource.initial(environment: ["CODEX_HOME": directory.path], home: directory)
+    try check(custom.hooksURL == hooks && custom.ipcPath == directory.appendingPathComponent("ipc/ipc.sock").path, "M01 home routing")
+    try check(!CoPingPaths.applicationSupport().path.hasPrefix(directory.path), "M01 moved CoPing storage")
+    print("Compatibility M01-M05/M08 synthetic migration: PASS")
+}
+
+private func testMalformedApprovalCompatibility() throws {
+    let decoder = CodexApprovalStateDecoder()
+    func message(_ state: [String: Any], version: Int = 11) -> [String: Any] {
+        ["type": "broadcast", "method": "thread-stream-state-changed", "version": version,
+         "params": ["conversationId": "session-A", "change": ["type": "snapshot", "conversationState": state]]]
+    }
+    for state in [[:], ["threadRuntimeStatus": [:]], ["threadRuntimeStatus": ["activeFlags": "bad"]]] as [[String: Any]] {
+        do { _ = try decoder.decodeJSONObject(message(state)); throw TestFailure(description: "A03 invalid v11 became ready") }
+        catch CodexApprovalStateDecodeError.invalidMessage {}
+    }
+    do { _ = try decoder.decodeJSONObject(message([:], version: 99)); throw TestFailure(description: "A02 accepted unknown version") }
+    catch CodexApprovalStateDecodeError.unsupportedVersion(99) {}
+    let mixed: [String: Any] = [
+        "threadRuntimeStatus": ["activeFlags": ["waitingOnApproval"]],
+        "turnHistory": ["history": ["entitiesByKey": [
+            "old": ["turnId": "turn-old", "status": "completed", "hookRuns": [["run": [
+                "eventName": "PermissionRequest", "id": "permission:call_old", "startedAt": 1]]]],
+            "current": ["turnId": "turn-A", "status": "inProgress", "turnStartedAtMs": 2000]
+        ]]]
+    ]
+    let observations = try decoder.decodeJSONObject(message(mixed))
+    try check(observations.count == 1 && observations[0].turnID == "turn-A"
+              && observations[0].kind == .waitingOnApproval(true),
+              "A08 historical approval replayed or current waiting lost")
+    var coordinator = CodexApprovalNotificationCoordinator()
+    let event = CodexEvent(type: .permissionRequested, sessionID: "session-A", turnID: "turn-A", eventID: "event-A", projectName: "test")
+    _ = coordinator.receive(event)
+    _ = coordinator.receive(CodexApprovalObservation(sessionID: "session-A", turnID: "turn-A", source: .live,
+        kind: .automaticReview(targetItemID: nil, status: .inProgress, startedAt: event.timestamp)))
+    try check(coordinator.unknownFallbackFired(key: event.uniqueKey).isEmpty, "A04 premature fallback")
+    let timeout = coordinator.reviewTimeoutFired(key: event.uniqueKey)
+    try check(timeout.contains(.scheduleUnknownFallback(key: event.uniqueKey)), "A09 stale review suppressed forever")
+    try check(coordinator.unknownFallbackFired(key: event.uniqueKey).contains(.notify(event: event, cause: .unknownState)), "A06 missing fallback")
+    print("Compatibility A02/A03/A04/A06/A09 synthetic logic: PASS")
+}
+
+private func testHelperUpgradeRecovery() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CoPingHelper-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("bundled"), installed = directory.appendingPathComponent("installed")
+    let old = Data("old-helper".utf8), new = Data("new-helper".utf8)
+    try old.write(to: installed)
+    try new.write(to: source)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: source.path)
+    let rejected = HelperInstaller(destinationURL: installed, sourceURL: source, signatureVerifier: { _ in false })
+    do { try rejected.install(); throw TestFailure(description: "M07 signature failure accepted") }
+    catch HelperInstallerError.signatureInvalid {}
+    try check(try Data(contentsOf: installed) == old, "M07 lost old helper on validation failure")
+    let upgrade = HelperInstaller(destinationURL: installed, sourceURL: source, signatureVerifier: { _ in true })
+    try upgrade.install()
+    try check(try Data(contentsOf: installed) == new, "M06 installed copy did not update")
+    let backups = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .filter { $0.lastPathComponent.hasPrefix("CoPingHook.previous-") }
+    try check(backups.count == 1 && (try Data(contentsOf: backups[0])) == old, "M07 recovery backup missing")
+    try upgrade.install()
+    let after = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+    try check(after.count == 3, "M03 identical helper replaced again")
+    print("Compatibility M06/M07 synthetic Helper upgrade/signature recovery: PASS")
+}
+
+private func testApprovalHandshakeDeadline() throws {
+    let directory = URL(fileURLWithPath: "/tmp/cpmon-\(UUID())", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                          attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("ipc.sock").path
+    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { throw TestFailure(description: "socket creation") }
+    defer { Darwin.close(fd) }
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+    let capacity = MemoryLayout.size(ofValue: address.sun_path)
+    path.withCString { src in
+        withUnsafeMutablePointer(to: &address.sun_path) {
+            $0.withMemoryRebound(to: CChar.self, capacity: capacity) { dest in
+                _ = strncpy(dest, src, capacity - 1)
+            }
+        }
+    }
+    let result = withUnsafePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    try check(result == 0 && Darwin.listen(fd, 2) == 0, "socket bind/listen")
+    // Listening socket accepts into the kernel backlog but never answers initialize.
+    let unavailable = DispatchSemaphore(value: 0)
+    let monitor = CodexApprovalStateMonitor(socketPath: path, initializationTimeout: 0.05,
+        recentSessionProvider: { _ in [] }, healthHandler: {
+            if $0 == .unavailable { unavailable.signal() }
+        }, observationHandler: { _ in })
+    monitor.start()
+    try check(unavailable.wait(timeout: .now() + 2) == .success, "A09 handshake never expired")
+    monitor.stop()
+    print("Compatibility A09 local silent socket initialization deadline: PASS")
+}
+
 @main
 private struct CoPingSelfTests {
     static func main() async {
         do {
+            try testQuestionLifecycleCompatibility()
+            try testCompatibilityMigration()
+            try testMalformedApprovalCompatibility()
+            try testHelperUpgradeRecovery()
+            try testApprovalHandshakeDeadline()
             try testPayloadSanitizer()
             try testApprovalNotificationMode()
             try testCodexApprovalStateDecoder()

@@ -4,6 +4,7 @@ import CoPingAppSupport
 import Combine
 import Foundation
 import OSLog
+import CryptoKit
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -16,13 +17,14 @@ final class AppModel: ObservableObject {
     @Published var launchAtLogin: Bool
     @Published var languagePreference: AppLanguagePreference
     @Published var connectionStatus: CodexConnectionStatus
+    @Published private(set) var approvalDiagnostics = CodexApprovalDiagnostics()
     @Published var approvalStateHealth: CodexApprovalMonitorHealth = .stopped
     @Published var notice: Notice?
     @Published var records: [DeliveryRecord]
     @Published var isBusy = false
 
-    private let defaults = UserDefaults.standard
-    private let historyStore = DeliveryHistoryStore()
+    private let defaults: UserDefaults
+    private let historyStore: DeliveryHistoryStore
     private let deliveryDispatcher = PushDeliveryDispatcher()
     private let barkSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -36,10 +38,19 @@ final class AppModel: ObservableObject {
         configuration.timeoutIntervalForResource = 10
         return URLSession(configuration: configuration)
     }()
-    private let helperInstaller = HelperInstaller()
-    private let hookManager = HookConfigurationManager()
+    private let helperInstaller: HelperInstaller
+    @Published private(set) var connectionSource: CodexConnectionSource
+    private var connectionSourceID: String { connectionSource.id }
+    private var hookManager: HookConfigurationManager {
+        HookConfigurationManager(hooksURL: connectionSource.hooksURL,
+                                 helperURL: helperInstaller.destinationURL,
+                                 sourceID: connectionSource.id,
+                                 verifiedToolLifecycle: connectionSource.verifiedToolLifecycle)
+    }
     private let loginManager = LoginItemManager()
-    private let taskTitleResolver = CodexTaskTitleResolver()
+    private var taskTitleResolver: CodexTaskTitleResolver {
+        CodexTaskTitleResolver(codexDirectory: connectionSource.homeURL)
+    }
     private let approvalLogger = Logger(
         subsystem: "com.coping.app",
         category: "ApprovalNotifications"
@@ -49,8 +60,22 @@ final class AppModel: ObservableObject {
         var task: Task<Void, Never>?
     }
 
-    private var approvalStateMonitor: CodexApprovalStateMonitor?
+    private var questions = CodexQuestionCoordinator()
+    private var questionTasks: [String: Task<Void, Never>] = [:]
+    private var processingGeneration = UUID()
+    private var monitorGeneration = UUID()
+    @Published private(set) var observedHookTypes: Set<String> = []
+    @Published private(set) var lastHookAt: Date?
+    private var approvalStateMonitor: (any CodexApprovalMonitoring)?
+    typealias MonitorFactory = (CodexConnectionSource,
+        @escaping CodexApprovalStateMonitor.HealthHandler,
+        @escaping @Sendable (CodexApprovalDiagnostics) -> Void,
+        @escaping CodexApprovalStateMonitor.ObservationHandler) -> any CodexApprovalMonitoring
+    private let monitorFactory: MonitorFactory
+    private let sleep: (Duration) async throws -> Void
+    private let deliveryOverride: ((CodexEvent) -> Void)?
     private var approvalCoordinator = CodexApprovalNotificationCoordinator()
+    private var approvalReviewTasks: [String: Task<Void, Never>] = [:]
     private var approvalFallbackTasks: [String: Task<Void, Never>] = [:]
     private var approvalDeliveryTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingInterventions: [String: PendingIntervention] = [:]
@@ -66,9 +91,36 @@ final class AppModel: ObservableObject {
         Task { @MainActor in self?.receive(event) }
     }
 
-    init(startServices: Bool = true) {
-        barkSettings = BarkSettingsCoordinator(defaults: defaults)
-        ntfySettings = NtfySettingsCoordinator(defaults: defaults)
+    init(startServices: Bool = true,
+         defaults: UserDefaults = .standard,
+         historyStore: DeliveryHistoryStore = DeliveryHistoryStore(),
+         deviceKeyStore: DeviceKeyStore = DeviceKeyStore(),
+         ntfyStore: NtfyConfigurationStore = NtfyConfigurationStore(),
+         helperInstaller: HelperInstaller = HelperInstaller(),
+         sleep: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         deliveryOverride: ((CodexEvent) -> Void)? = nil,
+         monitorFactory: @escaping MonitorFactory = { source, health, diagnostic, observations in
+             CodexApprovalStateMonitor(socketPath: source.ipcPath,
+                 recentSessionProvider: { now in
+                     try CodexRecentSessionProvider(codexDirectory: source.homeURL).recentSessionIDs(now: now)
+                 }, healthHandler: health, diagnosticHandler: diagnostic, observationHandler: observations)
+         }) {
+        self.defaults = defaults
+        self.historyStore = historyStore
+        self.helperInstaller = helperInstaller
+        self.sleep = sleep
+        self.deliveryOverride = deliveryOverride
+        self.monitorFactory = monitorFactory
+        if let data = defaults.data(forKey: "codexConnectionSource"),
+            let source = try? JSONDecoder().decode(CodexConnectionSource.self, from: data) {
+            connectionSource = source
+        } else {
+            let initialSource = CodexDetector.initialSource()
+            connectionSource = initialSource
+            defaults.set(try? JSONEncoder().encode(initialSource), forKey: "codexConnectionSource")
+        }
+        barkSettings = BarkSettingsCoordinator(configurationStore: deviceKeyStore, defaults: defaults)
+        ntfySettings = NtfySettingsCoordinator(configurationStore: ntfyStore, defaults: defaults)
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
         let loadedApprovalNotificationMode = ApprovalNotificationMode.migrated(
             storedRawValue: defaults.string(forKey: "approvalNotificationMode"),
@@ -81,10 +133,11 @@ final class AppModel: ObservableObject {
         records = historyStore.load()
         defaults.set(loadedApprovalNotificationMode.rawValue, forKey: "approvalNotificationMode")
 
-        if hookManager.isInstalled() {
-            connectionStatus = defaults.bool(forKey: "codexConnectionVerified")
-                ? .connected
-                : .awaitingVerification
+        connectionStatus = .disconnected
+        if hookManager.isInstalled() || hookManager.hasLegacyInstallation() {
+            let fingerprint = connectionFingerprint
+            connectionStatus = hookManager.isInstalled() && fingerprint != nil && defaults.string(forKey: "codexVerifiedFingerprint") == fingerprint
+                ? .connected : .awaitingVerification
             codexEventProcessingSuspended = false
         } else {
             connectionStatus = .disconnected
@@ -117,6 +170,7 @@ final class AppModel: ObservableObject {
 
         if
             startServices,
+            notificationsEnabled,
             approvalNotificationMode == .actionNeeded,
             !codexEventProcessingSuspended
         {
@@ -127,12 +181,65 @@ final class AppModel: ObservableObject {
     deinit {
         approvalStateMonitor?.stop()
         approvalFallbackTasks.values.forEach { $0.cancel() }
+        approvalReviewTasks.values.forEach { $0.cancel() }
+        questionTasks.values.forEach { $0.cancel() }
+        pendingInterventions.values.forEach { $0.task?.cancel() }
         approvalDeliveryTasks.values.forEach { $0.cancel() }
         barkSession.invalidateAndCancel()
         ntfySession.invalidateAndCancel()
     }
 
-    var codexDetected: Bool { CodexDetector.isInstalled }
+    var codexDetected: Bool { CodexDetector.isInstalled(source: connectionSource) }
+    var hostDescription: String {
+        let bundle = Bundle(url: connectionSource.appURL)
+        let version = bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(connectionSource.appURL.lastPathComponent) \(version) (\(build))"
+    }
+    private var connectionFingerprint: String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let hooks = try? Data(contentsOf: connectionSource.hooksURL),
+            let helper = try? Data(contentsOf: helperInstaller.destinationURL),
+            let source = try? encoder.encode(connectionSource) else { return nil }
+        var data = hooks
+        data.append(helper)
+        data.append(source)
+        data.append(Data(hostDescription.utf8))
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func selectConnectionPath(app: Bool) {
+        guard connectionStatus == .disconnected else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = app
+        panel.canChooseDirectories = !app
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var updated = connectionSource
+        if app { updated.appPath = url.path } else {
+            updated.codexHomePath = url.path
+            updated.homeOrigin = "explicit"
+        }
+        updated.id = UUID().uuidString
+        updated.verifiedToolLifecycle = false
+        connectionSource = updated
+        defaults.set(try? JSONEncoder().encode(updated), forKey: "codexConnectionSource")
+        defaults.removeObject(forKey: "codexVerifiedFingerprint")
+        cancelCodexNotificationProcessing()
+        seenEventKeys.removeAll()
+        seenEventSet.removeAll()
+        observedHookTypes.removeAll()
+        lastHookAt = nil
+        approvalDiagnostics = CodexApprovalDiagnostics()
+    }
+
+    func setVerifiedToolLifecycle(_ enabled: Bool) {
+        guard connectionStatus == .disconnected else { return }
+        connectionSource.verifiedToolLifecycle = enabled
+        defaults.set(try? JSONEncoder().encode(connectionSource), forKey: "codexConnectionSource")
+        defaults.removeObject(forKey: "codexVerifiedFingerprint")
+    }
     var baseURLString: String { barkSettings.baseURLString }
     var barkDestinationDrafts: [BarkDestinationDraft] { barkSettings.destinationDrafts }
     var barkValidationErrors: [UUID: String] { barkSettings.validationErrors }
@@ -314,20 +421,29 @@ final class AppModel: ObservableObject {
             return
         }
         isBusy = true
+        codexEventProcessingSuspended = true
+        cancelCodexNotificationProcessing()
         do {
+            let previousFingerprint = connectionFingerprint
             try helperInstaller.install()
             _ = try hookManager.installConfiguration()
+            let currentFingerprint = connectionFingerprint
+            let changed = previousFingerprint != currentFingerprint
             codexEventProcessingSuspended = false
-            defaults.set(false, forKey: "codexConnectionVerified")
-            connectionStatus = .awaitingVerification
+            if changed { defaults.removeObject(forKey: "codexVerifiedFingerprint") }
+            connectionStatus = currentFingerprint != nil
+                && defaults.string(forKey: "codexVerifiedFingerprint") == currentFingerprint
+                ? .connected : .awaitingVerification
             if approvalNotificationMode == .actionNeeded {
                 startApprovalStateMonitor()
             }
-            do {
-                try HookTrustLauncher().openReviewTerminal()
-                showNotice(AppText.trustHooksStatus, kind: .information)
-            } catch {
-                showNotice(error.localizedDescription, kind: .error)
+            if changed {
+                do {
+                    try HookTrustLauncher(source: connectionSource).openReviewTerminal()
+                    showNotice(AppText.trustHooksStatus, kind: .information)
+                } catch {
+                    showNotice(error.localizedDescription, kind: .error)
+                }
             }
         } catch {
             connectionStatus = .error
@@ -338,7 +454,7 @@ final class AppModel: ObservableObject {
 
     func openHookReview() {
         do {
-            try HookTrustLauncher().openReviewTerminal()
+            try HookTrustLauncher(source: connectionSource).openReviewTerminal()
             showNotice(AppText.reviewFinishedStatus, kind: .information)
         } catch {
             showNotice(error.localizedDescription, kind: .error)
@@ -351,7 +467,7 @@ final class AppModel: ObservableObject {
         do {
             try hookManager.uninstallConfiguration()
             try helperInstaller.uninstall()
-            defaults.set(false, forKey: "codexConnectionVerified")
+            defaults.removeObject(forKey: "codexVerifiedFingerprint")
             connectionStatus = .disconnected
             showNotice(AppText.disconnectedStatus, kind: .information)
         } catch {
@@ -363,6 +479,11 @@ final class AppModel: ObservableObject {
     func setNotificationsEnabled(_ enabled: Bool) {
         notificationsEnabled = enabled
         defaults.set(enabled, forKey: "notificationsEnabled")
+        if !enabled {
+            cancelCodexNotificationProcessing()
+        } else {
+            startApprovalStateMonitor()
+        }
     }
 
     func setApprovalNotificationMode(_ mode: ApprovalNotificationMode) {
@@ -434,31 +555,33 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func receive(_ event: CodexEvent) {
+    func receive(_ event: CodexEvent) {
         guard !codexEventProcessingSuspended, event.verifiesConnection else {
             return
         }
 
-        if connectionStatus.verify(with: event) {
-            defaults.set(true, forKey: "codexConnectionVerified")
+        if let sourceID = event.sourceID, sourceID != connectionSourceID { return }
+        // Untagged old Helper events retain notifications, but cannot verify the selected source.
+        if event.sourceID == connectionSourceID && hookManager.isInstalled() && connectionStatus.verify(with: event) {
+            defaults.set(connectionFingerprint, forKey: "codexVerifiedFingerprint")
             showNotice(AppText.codexConnectionVerified, kind: .success)
         }
 
-        guard remember(event.uniqueKey) else { return }
+        observedHookTypes.insert(event.type.rawValue + "/" + (event.phase?.rawValue ?? "legacy"))
+        lastHookAt = Date()
+        guard notificationsEnabled, remember(event.uniqueKey) else { return }
 
         switch event.type {
         case .sessionStarted:
             break
         case .completed:
-            cancelPendingInterventions(turnKey: event.turnKey)
-            applyApprovalEffects(
-                approvalCoordinator.complete(
-                    sessionID: event.sessionID,
-                    turnID: event.turnID
-                )
-            )
-            let taskTitle = taskTitleResolver.title(for: event.sessionID)
+            // Stop is only a candidate. Do not cancel unresolved questions/approvals.
+            // Legacy completion delivery remains explicitly limited until a root terminal
+            // signal after all Stop hooks is verified (CP-03).
+            let generation = processingGeneration
+            let taskTitle = resolveTaskTitle(for: event)
             Task {
+                guard generation == processingGeneration else { return }
                 await deliver(
                     PushNotification(
                         title: AppText.completedNotificationTitle,
@@ -469,7 +592,7 @@ final class AppModel: ObservableObject {
             }
         case .permissionRequested:
             approvalLogger.info(
-                "Permission request session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) mode=\(self.approvalNotificationMode.rawValue, privacy: .public)"
+                "Permission request session=\(event.sessionID, privacy: .private) turn=\(event.turnID ?? "-", privacy: .private) mode=\(self.approvalNotificationMode.rawValue, privacy: .public)"
             )
             switch approvalNotificationMode {
             case .all:
@@ -481,7 +604,30 @@ final class AppModel: ObservableObject {
                 break
             }
         case .questionRequested:
-            scheduleIntervention(event)
+            applyQuestionEffects(questions.receive(event))
+        }
+    }
+
+    private func applyQuestionEffects(_ effects: [CodexQuestionCoordinator.Effect]) {
+        for effect in effects {
+            switch effect {
+            case let .cancel(key):
+                questionTasks.removeValue(forKey: key)?.cancel()
+            case let .schedule(key):
+                let generation = processingGeneration
+                questionTasks[key] = Task { [weak self, sleep] in
+                    do { try await sleep(.seconds(5)) } catch { return }
+                    guard let self, !Task.isCancelled,
+                        generation == processingGeneration,
+                        notificationsEnabled, !codexEventProcessingSuspended,
+                        let event = questions.take(key) else { return }
+                    questionTasks.removeValue(forKey: key)
+                    await deliver(PushNotification(
+                        title: AppText.questionNotificationTitle,
+                        body: AppText.questionNotificationBody(taskTitle: resolveTaskTitle(for: event)),
+                        urgency: .high), for: event)
+                }
+            }
         }
     }
 
@@ -501,9 +647,9 @@ final class AppModel: ObservableObject {
     private func armPendingIntervention(_ key: String, delay: Duration) {
         guard var pending = pendingInterventions[key] else { return }
         pending.task?.cancel()
-        let task = Task { [weak self] in
+        let task = Task { [weak self, sleep] in
             do {
-                try await Task.sleep(for: delay)
+                try await sleep(delay)
             } catch {
                 return
             }
@@ -514,17 +660,18 @@ final class AppModel: ObservableObject {
     }
 
     private func deliverPendingIntervention(_ key: String) async {
-        guard let pending = pendingInterventions.removeValue(forKey: key) else { return }
+        guard !Task.isCancelled, notificationsEnabled, !codexEventProcessingSuspended,
+            let pending = pendingInterventions.removeValue(forKey: key) else { return }
 
         let event = pending.event
         let title: String
         let body: String
-        let taskTitle = taskTitleResolver.title(for: event.sessionID)
+        let taskTitle = resolveTaskTitle(for: event)
         switch event.type {
         case .permissionRequested:
             guard approvalNotificationMode == .all else { return }
             approvalLogger.info(
-                "Delivering permission notification session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) mode=\(self.approvalNotificationMode.rawValue, privacy: .public)"
+                "Delivering permission notification session=\(event.sessionID, privacy: .private) turn=\(event.turnID ?? "-", privacy: .private) mode=\(self.approvalNotificationMode.rawValue, privacy: .public)"
             )
             title = AppText.permissionNotificationTitle
             body = AppText.permissionNotificationBody(taskTitle: taskTitle)
@@ -549,31 +696,33 @@ final class AppModel: ObservableObject {
         pendingInterventions.removeValue(forKey: key)?.task?.cancel()
     }
 
-    private func cancelPendingInterventions(turnKey: String) {
-        let keys = pendingInterventions.compactMap { key, pending in
-            pending.event.turnKey == turnKey ? key : nil
-        }
-        for key in keys {
-            cancelPendingIntervention(key)
-        }
-    }
-
     private func startApprovalStateMonitor() {
         guard
+            notificationsEnabled,
             approvalNotificationMode == .actionNeeded,
             !codexEventProcessingSuspended
         else {
             return
         }
         if approvalStateMonitor == nil {
-            approvalStateMonitor = CodexApprovalStateMonitor(
-                healthHandler: { [weak self] health in
+            let generation = UUID()
+            monitorGeneration = generation
+            approvalStateMonitor = monitorFactory(
+                connectionSource, { [weak self] health in
                     Task { @MainActor in
+                        guard self?.monitorGeneration == generation else { return }
                         self?.receiveApprovalStateHealth(health)
                     }
                 },
-                observationHandler: { [weak self] observations in
+                { [weak self] diagnostics in
                     Task { @MainActor in
+                        guard self?.monitorGeneration == generation else { return }
+                        self?.approvalDiagnostics = diagnostics
+                    }
+                },
+                { [weak self] observations in
+                    Task { @MainActor in
+                        guard self?.monitorGeneration == generation else { return }
                         self?.receiveApprovalObservations(observations)
                     }
                 }
@@ -583,6 +732,7 @@ final class AppModel: ObservableObject {
     }
 
     private func stopApprovalStateMonitor() {
+        monitorGeneration = UUID()
         approvalStateHealth = .stopped
         approvalStateMonitor?.stop()
         approvalStateMonitor = nil
@@ -592,6 +742,7 @@ final class AppModel: ObservableObject {
         _ observations: [CodexApprovalObservation]
     ) {
         guard
+            notificationsEnabled,
             approvalNotificationMode == .actionNeeded,
             !codexEventProcessingSuspended
         else {
@@ -607,6 +758,7 @@ final class AppModel: ObservableObject {
         _ health: CodexApprovalMonitorHealth
     ) {
         guard
+            notificationsEnabled,
             approvalNotificationMode == .actionNeeded,
             !codexEventProcessingSuspended
         else {
@@ -621,6 +773,19 @@ final class AppModel: ObservableObject {
     ) {
         for effect in effects {
             switch effect {
+            case let .scheduleReviewTimeout(key):
+                guard approvalReviewTasks[key] == nil else { continue }
+                let generation = processingGeneration
+                approvalReviewTasks[key] = Task { [weak self, sleep] in
+                    do { try await sleep(.seconds(30)) } catch { return }
+                    guard let self, !Task.isCancelled, generation == processingGeneration,
+                        notificationsEnabled, approvalNotificationMode == .actionNeeded,
+                        !codexEventProcessingSuspended, approvalReviewTasks[key] != nil else { return }
+                    approvalReviewTasks.removeValue(forKey: key)
+                    applyApprovalEffects(approvalCoordinator.reviewTimeoutFired(key: key))
+                }
+            case let .cancelReviewTimeout(key):
+                approvalReviewTasks.removeValue(forKey: key)?.cancel()
             case let .scheduleUnknownFallback(key):
                 scheduleApprovalFallback(key: key)
             case let .cancelUnknownFallback(key):
@@ -637,20 +802,17 @@ final class AppModel: ObservableObject {
 
     private func scheduleApprovalFallback(key: String) {
         guard approvalFallbackTasks[key] == nil else { return }
-        approvalFallbackTasks[key] = Task { [weak self] in
+        let generation = processingGeneration
+        approvalFallbackTasks[key] = Task { [weak self, sleep] in
             do {
-                try await Task.sleep(for: .seconds(5))
+                try await sleep(.seconds(5))
             } catch {
                 return
             }
-            guard let self else { return }
+            guard let self, !Task.isCancelled, generation == processingGeneration,
+                notificationsEnabled, approvalNotificationMode == .actionNeeded,
+                !codexEventProcessingSuspended, approvalFallbackTasks[key] != nil else { return }
             approvalFallbackTasks.removeValue(forKey: key)
-            guard
-                approvalNotificationMode == .actionNeeded,
-                !codexEventProcessingSuspended
-            else {
-                return
-            }
             applyApprovalEffects(approvalCoordinator.unknownFallbackFired(key: key))
         }
     }
@@ -660,13 +822,14 @@ final class AppModel: ObservableObject {
         cause: CodexApprovalNotificationCause
     ) {
         guard
+            notificationsEnabled,
             approvalNotificationMode == .actionNeeded,
             !codexEventProcessingSuspended
         else {
             return
         }
         let taskID = UUID()
-        let taskTitle = taskTitleResolver.title(for: event.sessionID)
+        let taskTitle = resolveTaskTitle(for: event)
         let body: String
         switch cause {
         case .requiresUserAction:
@@ -675,10 +838,15 @@ final class AppModel: ObservableObject {
             body = AppText.permissionNotificationBody(taskTitle: taskTitle)
         }
         approvalLogger.info(
-            "Delivering filtered permission notification session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) cause=\(String(describing: cause), privacy: .public)"
+            "Delivering filtered permission notification session=\(event.sessionID, privacy: .private) turn=\(event.turnID ?? "-", privacy: .private) cause=\(String(describing: cause), privacy: .public)"
         )
+        let generation = processingGeneration
         approvalDeliveryTasks[taskID] = Task { [weak self] in
-            guard let self else { return }
+            guard let self, !Task.isCancelled, generation == processingGeneration,
+                notificationsEnabled, approvalNotificationMode == .actionNeeded,
+                !codexEventProcessingSuspended, approvalDeliveryTasks[taskID] != nil else { return }
+            defer { approvalDeliveryTasks.removeValue(forKey: taskID) }
+            guard approvalCoordinator.isDeliveryEligible(event) else { return }
             await deliver(
                 PushNotification(
                     title: AppText.permissionNotificationTitle,
@@ -687,7 +855,6 @@ final class AppModel: ObservableObject {
                 ),
                 for: event
             )
-            approvalDeliveryTasks.removeValue(forKey: taskID)
         }
     }
 
@@ -699,6 +866,8 @@ final class AppModel: ObservableObject {
     }
 
     private func cancelCodexNotificationProcessing() {
+        processingGeneration = UUID()
+        applyQuestionEffects(questions.reset())
         for pending in pendingInterventions.values {
             pending.task?.cancel()
         }
@@ -708,11 +877,15 @@ final class AppModel: ObservableObject {
             task.cancel()
         }
         approvalFallbackTasks.removeAll()
+        approvalReviewTasks.values.forEach { $0.cancel() }
+        approvalReviewTasks.removeAll()
         cancelApprovalDeliveries()
         stopApprovalStateMonitor()
     }
 
     private func deliver(_ notification: PushNotification, for event: CodexEvent) async {
+        guard !Task.isCancelled, !codexEventProcessingSuspended else { return }
+        if let deliveryOverride { deliveryOverride(event); return }
         let deliveryChannels = PushDeliveryRouting.eventChannels(
             notificationsEnabled: notificationsEnabled,
             barkEnabled: barkEnabled,
@@ -788,7 +961,7 @@ final class AppModel: ObservableObject {
         )
         if event.type == .permissionRequested {
             approvalLogger.info(
-                "Recorded permission notification session=\(event.sessionID, privacy: .public) turn=\(event.turnID ?? "-", privacy: .public) attempts=\(attempts.count, privacy: .public)"
+                "Recorded permission notification session=\(event.sessionID, privacy: .private) turn=\(event.turnID ?? "-", privacy: .private) attempts=\(attempts.count, privacy: .public)"
             )
         }
         presentDeliveryResult(attempts)
@@ -875,6 +1048,11 @@ final class AppModel: ObservableObject {
             }
             showNotice(AppText.pushFailed(detail), kind: .error)
         }
+    }
+
+    private func resolveTaskTitle(for event: CodexEvent) -> String? {
+        guard event.sourceID == connectionSourceID else { return nil }
+        return taskTitleResolver.title(for: event.sessionID)
     }
 
     private func remember(_ key: String) -> Bool {

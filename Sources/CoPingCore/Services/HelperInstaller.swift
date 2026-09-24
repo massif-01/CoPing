@@ -1,11 +1,10 @@
-import CoPingCore
 import Foundation
 
-enum HelperInstallerError: LocalizedError {
+public enum HelperInstallerError: LocalizedError {
     case bundledHelperMissing
     case signatureInvalid
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .bundledHelperMissing:
             return AppText.bundledHelperMissing
@@ -15,19 +14,22 @@ enum HelperInstallerError: LocalizedError {
     }
 }
 
-struct HelperInstaller {
-    let destinationURL: URL
+public struct HelperInstaller {
+    public let destinationURL: URL
+    private let sourceURL: URL
+    private let signatureVerifier: (URL) -> Bool
     private let fileManager = FileManager.default
 
-    init(destinationURL: URL = CoPingPaths.installedHelper()) {
+    public init(destinationURL: URL = CoPingPaths.installedHelper(),
+                sourceURL: URL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/CoPingHook"),
+                signatureVerifier: @escaping (URL) -> Bool = HelperInstaller.verifySignature) {
         self.destinationURL = destinationURL
+        self.sourceURL = sourceURL
+        self.signatureVerifier = signatureVerifier
     }
 
-    func install() throws {
-        let source = Bundle.main.bundleURL
-            .appendingPathComponent("Contents", isDirectory: true)
-            .appendingPathComponent("Helpers", isDirectory: true)
-            .appendingPathComponent("CoPingHook", isDirectory: false)
+    public func install() throws {
+        let source = sourceURL
         guard fileManager.isExecutableFile(atPath: source.path) else {
             throw HelperInstallerError.bundledHelperMissing
         }
@@ -41,22 +43,27 @@ struct HelperInstaller {
             [.posixPermissions: NSNumber(value: Int16(0o700))],
             ofItemAtPath: temporary.path
         )
-        guard verifySignature(at: temporary) else {
+        guard signatureVerifier(temporary) else {
             throw HelperInstallerError.signatureInvalid
         }
         if fileManager.fileExists(atPath: destinationURL.path) {
-            try fileManager.removeItem(at: destinationURL)
+            if try Data(contentsOf: destinationURL) == Data(contentsOf: temporary) { return }
+            // Atomic replacement retains the installed helper if replacement fails.
+            _ = try fileManager.replaceItemAt(destinationURL, withItemAt: temporary,
+                                             backupItemName: "CoPingHook.previous-\(UUID().uuidString)",
+                                             options: [.withoutDeletingBackupItem])
+        } else {
+            try fileManager.moveItem(at: temporary, to: destinationURL)
         }
-        try fileManager.moveItem(at: temporary, to: destinationURL)
     }
 
-    func uninstall() throws {
+    public func uninstall() throws {
         if fileManager.fileExists(atPath: destinationURL.path) {
             try fileManager.removeItem(at: destinationURL)
         }
     }
 
-    private func verifySignature(at url: URL) -> Bool {
+    public static func verifySignature(at url: URL) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
         process.arguments = ["--verify", "--strict", url.path]

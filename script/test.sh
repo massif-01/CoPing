@@ -9,3 +9,5 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$ROOT_DIR/.build/swiftpm-cache"
 bash "$ROOT_DIR/script/test_release_version.sh"
 swift build --disable-sandbox --package-path "$ROOT_DIR" -Xswiftc -warnings-as-errors
 swift run --disable-sandbox --package-path "$ROOT_DIR" CoPingSelfTests
+
+bash "$ROOT_DIR/script/test_lifecycle_regressions.sh"

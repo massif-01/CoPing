@@ -2,12 +2,28 @@ import Darwin
 import Foundation
 import SQLite3
 
-public final class CodexApprovalStateMonitor: @unchecked Sendable {
+public struct CodexApprovalDiagnostics: Sendable {
+    public var observedVersion: Int?
+    public var lastValidStateAt: Date?
+    public init() {}
+}
+
+public protocol CodexApprovalMonitoring: AnyObject {
+    func start()
+    func stop()
+    func follow(sessionID: String)
+    func unfollow(sessionID: String)
+}
+
+public final class CodexApprovalStateMonitor: CodexApprovalMonitoring, @unchecked Sendable {
     public typealias ObservationHandler =
         @Sendable ([CodexApprovalObservation]) -> Void
     public typealias HealthHandler =
         @Sendable (CodexApprovalMonitorHealth) -> Void
 
+    private let diagnosticHandler: @Sendable (CodexApprovalDiagnostics) -> Void
+    private var diagnostics = CodexApprovalDiagnostics()
+    private let initializationTimeout: TimeInterval
     private let socketPath: String
     private let queue: DispatchQueue
     private let queueKey = DispatchSpecificKey<Void>()
@@ -16,6 +32,10 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
     private let recentSessionProvider: @Sendable (Date) throws -> [String]
     private let decoder = CodexApprovalStateDecoder()
 
+    private var initializationDeadline: DispatchWorkItem?
+    private var generation = UUID()
+    private var reconnectDelay: Double = 1
+    private var initializeRequestID: String?
     private var running = false
     private var descriptor: Int32 = -1
     private var readSource: DispatchSourceRead?
@@ -30,6 +50,7 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
 
     public init(
         socketPath: String = CoPingPaths.codexIPCPath(),
+        initializationTimeout: TimeInterval = 5,
         queue: DispatchQueue = DispatchQueue(label: "com.coping.codex-approval-state"),
         recentSessionProvider: @escaping @Sendable (Date) throws -> [String] = { now in
             try CodexRecentSessionProvider().recentSessionIDs(
@@ -38,12 +59,15 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
             )
         },
         healthHandler: @escaping HealthHandler = { _ in },
+        diagnosticHandler: @escaping @Sendable (CodexApprovalDiagnostics) -> Void = { _ in },
         observationHandler: @escaping ObservationHandler
     ) {
         self.socketPath = socketPath
+        self.initializationTimeout = initializationTimeout
         self.queue = queue
         self.recentSessionProvider = recentSessionProvider
         self.healthHandler = healthHandler
+        self.diagnosticHandler = diagnosticHandler
         self.observationHandler = observationHandler
         queue.setSpecific(key: queueKey, value: ())
     }
@@ -128,7 +152,7 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
     private func refreshRecentSessions() {
         guard running else { return }
         do {
-            recentSessionIDs = Set(try recentSessionProvider(Date()))
+            recentSessionIDs = Set(try recentSessionProvider(Date()).prefix(100))
         } catch {
             setHealth(.unavailable)
         }
@@ -179,13 +203,24 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
             scheduleReconnect()
             return
         }
-        let result = withUnsafePointer(to: &address) {
+        _ = fcntl(socketFD, F_SETFL, O_NONBLOCK)
+        var result = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(
                     socketFD,
                     $0,
                     socklen_t(MemoryLayout<sockaddr_un>.size)
                 )
+            }
+        }
+        if result != 0 && errno == EINPROGRESS {
+            var writable = pollfd(fd: socketFD, events: Int16(POLLOUT), revents: 0)
+            if poll(&writable, 1, 500) > 0 {
+                var socketError: Int32 = 0
+                var size = socklen_t(MemoryLayout<Int32>.size)
+                if getsockopt(socketFD, SOL_SOCKET, SO_ERROR, &socketError, &size) == 0 && socketError == 0 {
+                    result = 0
+                }
             }
         }
         guard result == 0 else {
@@ -201,20 +236,33 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
         }
 
         descriptor = socketFD
+        generation = UUID()
+        let connection = generation
+        decoder.reset()
         inputBuffer.removeAll(keepingCapacity: true)
         clientID = nil
         followedSessionIDs.removeAll()
 
         let source = DispatchSource.makeReadSource(fileDescriptor: socketFD, queue: queue)
-        source.setEventHandler { [weak self] in self?.readAvailableFrames() }
+        source.setEventHandler { [weak self] in
+            guard let self, generation == connection else { return }
+            readAvailableFrames()
+        }
         source.setCancelHandler { close(socketFD) }
         readSource = source
         source.resume()
         setHealth(.connecting)
 
+        let deadline = DispatchWorkItem { [weak self] in
+            guard let self, generation == connection, clientID == nil else { return }
+            disconnect(scheduleReconnect: true)
+        }
+        initializationDeadline = deadline
+        queue.asyncAfter(deadline: .now() + initializationTimeout, execute: deadline)
+        initializeRequestID = "coping-\(UUID().uuidString)"
         send([
             "type": "request",
-            "requestId": "coping-\(UUID().uuidString)",
+            "requestId": initializeRequestID!,
             "version": 0,
             "method": "initialize",
             "params": ["clientType": "coping"],
@@ -274,10 +322,13 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
 
         if type == "response",
             root["method"] as? String == "initialize",
+            root["requestId"] as? String == initializeRequestID,
             root["resultType"] as? String == "success",
             let result = root["result"] as? [String: Any],
             let initializedClientID = result["clientId"] as? String
         {
+            initializationDeadline?.cancel()
+            initializationDeadline = nil
             clientID = initializedClientID
             reconcileFollowers()
             return
@@ -307,9 +358,19 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
         else {
             return
         }
+        diagnostics.observedVersion = (root["version"] as? NSNumber)?.intValue
+        defer { diagnosticHandler(diagnostics) }
         do {
+            guard clientID != nil else { return }
             let observations = try decoder.decodeJSONObject(root)
-            setHealth(.ready)
+            reconnectDelay = 1
+            diagnostics.lastValidStateAt = Date()
+            let unknownReview = observations.contains {
+                if case .automaticReview(_, .unknown, _) = $0.kind { return true }
+                return false
+            }
+            if unknownReview { setHealth(.unavailable) }
+            else if !observations.isEmpty { setHealth(.ready) }
             if !observations.isEmpty {
                 observationHandler(observations)
             }
@@ -373,6 +434,11 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
     }
 
     private func disconnect(scheduleReconnect: Bool) {
+        generation = UUID()
+        decoder.reset()
+        initializationDeadline?.cancel()
+        initializationDeadline = nil
+        initializeRequestID = nil
         clientID = nil
         followedSessionIDs.removeAll()
         inputBuffer.removeAll(keepingCapacity: true)
@@ -406,7 +472,8 @@ public final class CodexApprovalStateMonitor: @unchecked Sendable {
             connect()
         }
         reconnectWorkItem = workItem
-        queue.asyncAfter(deadline: .now() + 1, execute: workItem)
+        queue.asyncAfter(deadline: .now() + reconnectDelay, execute: workItem)
+        reconnectDelay = min(reconnectDelay * 2, 30)
     }
 
     private func secureSocketExists() -> Bool {

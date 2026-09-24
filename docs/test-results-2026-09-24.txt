@@ -1,0 +1,35 @@
+CoPing local verification summary — 2026-09-24
+Evidence: synthetic fixtures, temporary files, local sockets and Mock HTTP. No real desktop/phone certification.
+Baseline: b1c38b7d544fcd59735d01ddee1fefec75949f54 (isolated git archive).
+Default Xcode test: BLOCKED (license not accepted; exit 69).
+CLT + macOS 27 SDK: BLOCKED (SwiftUIMacros missing).
+CLT Swift 6.4 + macOS 26.5 SDK: selected per process, no system configuration change.
+
+BASELINE:
+ReleaseVersionTests: PASS
+Build complete! (28.56秒)
+Build complete! (18.36秒)
+CoPingSelfTests: PASS
+
+MODIFIED BRANCH:
+ReleaseVersionTests: PASS
+Build complete! (3.12秒)
+Build complete! (2.00秒)
+Compatibility Q01-Q11/Q14-Q15 + M06/M11 synthetic: PASS
+Compatibility M01-M05/M08 synthetic migration: PASS
+Compatibility A02/A03/A04/A06/A09 synthetic logic: PASS
+Compatibility M06/M07 synthetic Helper upgrade/signature recovery: PASS
+Compatibility A09 local silent socket initialization deadline: PASS
+CoPingSelfTests: PASS
+
+HELPER INPUT:
+Helper invalid-json: PASS
+Helper unknown-hook: PASS
+Helper over-limit: PASS
+Helper wrong-types: PASS
+Helper stalled-input deadline: PASS (0.453s)
+
+git diff --check: PASS
+Warnings retained: CLT developer framework/library search paths and arclite linker warnings.
+Full script builds all products with -warnings-as-errors, then runs CoPingSelfTests.
+Real Hook trust, message version, reliable root completion, UI rendering, signed package migration and phone receipt: UNVERIFIED.

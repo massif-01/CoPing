@@ -1,0 +1,70 @@
+Command: DEVELOPER_DIR=/Library/Developer/CommandLineTools SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash script/test.sh
+Exit: 0
+
+ReleaseVersionTests: PASS
+Building for debugging...
+[3 / 17] CoPingAppSupport
+[12 / 24] CoPingIPC
+/Users/massif/CoPing/Package.swift: CoPingAppSupport: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[18 / 30] CoPingIPC
+/Users/massif/CoPing/Package.swift: CoPingIPC: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[35 / 47] CoPingCore
+[37 / 47] CoPingCore
+[38 / 47] CoPingCore
+[43 / 51] CoPingSelfTests-product
+warning: unable to find Objective-C runtime support library 'arclite'; pass '-no-link-objc-runtime' to silence this warning
+/Users/massif/CoPing/Package.swift: CoPingHook-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/usr/lib' not found
+/Users/massif/CoPing/Package.swift: CoPingHook-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+/Users/massif/CoPing/Package.swift: CoPingCore: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[52 / 57] CoPingSelfTests-product
+[52 / 57] CoPing-product
+[54 / 58] CoPing-product
+[56 / 60] CoPingSelfTests-product
+warning: unable to find Objective-C runtime support library 'arclite'; pass '-no-link-objc-runtime' to silence this warning
+/Users/massif/CoPing/Package.swift: CoPingSelfTests-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/usr/lib' not found
+/Users/massif/CoPing/Package.swift: CoPingSelfTests-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[58 / 60] CoPingSelfTests-product
+warning: unable to find Objective-C runtime support library 'arclite'; pass '-no-link-objc-runtime' to silence this warning
+/Users/massif/CoPing/Package.swift: CoPing-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/usr/lib' not found
+/Users/massif/CoPing/Package.swift: CoPing-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[63 / 63] CoPingSelfTests-product
+Build complete! (2.19秒)
+Building for debugging...
+[3 / 12] CoPingAppSupport
+[9 / 18] CoPingIPC
+/Users/massif/CoPing/Package.swift: CoPingAppSupport: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[16 / 24] CoPingIPC
+/Users/massif/CoPing/Package.swift: CoPingIPC: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[33 / 39] CoPingCore
+[39 / 44] CoPingCore
+[41 / 46] CoPingCore
+/Users/massif/CoPing/Package.swift: CoPingCore: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[44 / 47] CoPingSelfTests-product
+warning: unable to find Objective-C runtime support library 'arclite'; pass '-no-link-objc-runtime' to silence this warning
+/Users/massif/CoPing/Package.swift: CoPingSelfTests-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/usr/lib' not found
+/Users/massif/CoPing/Package.swift: CoPingSelfTests-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[46 / 47] CoPingSelfTests-product
+Build complete! (1.96秒)
+Compatibility Q01-Q11/Q14-Q15 + M06/M11 synthetic: PASS
+Compatibility M01-M05/M08 synthetic migration: PASS
+Compatibility A02/A03/A04/A06/A09 synthetic logic: PASS
+Compatibility M06/M07 synthetic Helper upgrade/signature recovery: PASS
+Compatibility A09 local silent socket initialization deadline: PASS
+CoPingSelfTests: PASS
+R1: PASS (production components + non-loss counterexamples)
+R2: PASS (production components + non-loss counterexamples)
+R3: PASS (production components + non-loss counterexamples)
+R4: PASS (production components + non-loss counterexamples)
+R5: PASS (production components + non-loss counterexamples)
+R6: PASS (production components + non-loss counterexamples)
+
+Command: python3 script/test_hook_input.py .build/out/Products/Debug/CoPingHook
+Exit: 0
+Helper invalid-json: PASS
+Helper unknown-hook: PASS
+Helper over-limit: PASS
+Helper wrong-types: PASS
+Helper stalled-input deadline: PASS (0.460s)
+
+Command: git diff --check
+Exit: 0; no output

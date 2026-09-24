@@ -1,0 +1,6 @@
+R1: FAIL: default Pre/Post/Stop delivered a resolved question
+R2: FAIL: same source/session/native call with no turn did not resolve
+R3: FAIL: proven same approval emitted manual plus fallback
+R4: FAIL: fallback left an orphan review watchdog
+R5: FAIL: resume did not restart action-needed monitoring
+R6: FAIL: identical old wire gained new identity on replay

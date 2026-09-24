@@ -17,15 +17,16 @@ enum HookTrustLauncherError: LocalizedError {
 }
 
 struct HookTrustLauncher {
+    let source: CodexConnectionSource
     func openReviewTerminal() throws {
-        guard CodexDetector.isInstalled else {
+        guard CodexDetector.isInstalled(source: source) else {
             throw HookTrustLauncherError.codexNotFound
         }
 
         let support = CoPingPaths.applicationSupport()
         try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         let scriptURL = support.appendingPathComponent("review-hooks.command")
-        let codex = shellQuote(CodexDetector.executableURL.path)
+        let codex = shellQuote(source.executableURL.path)
         let script = """
         #!/bin/zsh
         clear
@@ -35,7 +36,7 @@ struct HookTrustLauncher {
         echo
         echo \(shellQuote(AppText.terminalQuitInstruction))
         echo
-        COPING_SETUP=1 \(codex) -C "$HOME"
+        COPING_SETUP=1 CODEX_HOME=\(shellQuote(source.codexHomePath)) \(codex) -C "$HOME"
         echo
         echo \(shellQuote(AppText.terminalReviewFinished))
         """

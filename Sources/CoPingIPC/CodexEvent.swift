@@ -8,6 +8,20 @@ public struct CodexEvent: Codable, Equatable, Sendable {
         case questionRequested
     }
 
+    public enum Phase: String, Codable, Sendable {
+        case requested, accepted, resolved, stopCandidate
+    }
+    public enum QuestionMode: String, Codable, Sendable { case blocking, async, unknown }
+    public enum IdentityQuality: String, Codable, Sendable { case strong, weak }
+    public let callID: String?
+    public let phase: Phase?
+    public let questionMode: QuestionMode?
+    /// Opaque installation/source token; never a filesystem path.
+    public let sourceID: String?
+    public var identityQuality: IdentityQuality {
+        callID != nil ? .strong : .weak
+    }
+
     public let version: Int
     public let type: EventType
     public let sessionID: String
@@ -22,9 +36,17 @@ public struct CodexEvent: Codable, Equatable, Sendable {
         sessionID: String,
         turnID: String?,
         eventID: String? = nil,
+        callID: String? = nil,
+        phase: Phase? = nil,
+        questionMode: QuestionMode? = nil,
+        sourceID: String? = nil,
         projectName: String,
         timestamp: Date = Date()
     ) {
+        self.callID = callID
+        self.phase = phase
+        self.questionMode = questionMode
+        self.sourceID = sourceID
         self.version = version
         self.type = type
         self.sessionID = sessionID
@@ -35,8 +57,12 @@ public struct CodexEvent: Codable, Equatable, Sendable {
     }
 
     public var uniqueKey: String {
-        [type.rawValue, sessionID, turnID ?? "-", eventID ?? "-"]
-            .joined(separator: ":")
+        // JSON array encoding preserves boundaries and distinguishes nil from literal markers.
+        Self.key([type.rawValue, sessionID, turnID, callID ?? eventID, phase?.rawValue, sourceID])
+    }
+
+    public static func key(_ fields: [String?]) -> String {
+        String(decoding: try! JSONEncoder().encode(fields), as: UTF8.self)
     }
 
     public var verifiesConnection: Bool {
@@ -44,19 +70,27 @@ public struct CodexEvent: Codable, Equatable, Sendable {
     }
 
     public var turnKey: String {
-        [sessionID, turnID ?? "-"].joined(separator: ":")
+        Self.key([sessionID, turnID, sourceID])
     }
 
-    public func addingEventIDIfMissing(_ generatedEventID: @autoclosure () -> String)
+    public func addingEventIDIfMissing()
         -> CodexEvent
     {
-        guard type == .permissionRequested, eventID == nil else { return self }
+        guard type != .sessionStarted, eventID == nil, callID == nil else { return self }
         return CodexEvent(
             version: version,
             type: type,
             sessionID: sessionID,
             turnID: turnID,
-            eventID: generatedEventID(),
+            // Old wire payloads already carry their creation timestamp. Normalize
+            // deterministically at ingress; a receive attempt is not a new event.
+            eventID: "legacy-wire:" + Self.key([String(version), type.rawValue, sessionID,
+                turnID, sourceID, phase?.rawValue, questionMode?.rawValue, projectName,
+                String(timestamp.timeIntervalSinceReferenceDate.bitPattern, radix: 16)]),
+            callID: callID,
+            phase: phase,
+            questionMode: questionMode,
+            sourceID: sourceID,
             projectName: projectName,
             timestamp: timestamp
         )

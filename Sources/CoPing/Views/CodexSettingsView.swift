@@ -4,6 +4,7 @@ import SwiftUI
 
 struct CodexSettingsView: View {
     @ObservedObject var model: AppModel
+    @State private var advancedSettingsExpanded = false
 
     var body: some View {
         SettingsPage(
@@ -16,7 +17,7 @@ struct CodexSettingsView: View {
                 SettingsRow(
                     systemImage: "apps.iphone",
                     tint: model.codexDetected ? .green : .red,
-                    title: "ChatGPT.app"
+                    title: AppText.codexApplication
                 ) {
                     Label(
                         model.codexDetected
@@ -253,7 +254,75 @@ struct CodexSettingsView: View {
             }
             .controlSize(.regular)
             .padding(.horizontal, 4)
+
+            SettingsCard {
+                DisclosureGroup(isExpanded: $advancedSettingsExpanded) {
+                    advancedSettings
+                        .padding(.top, 12)
+                } label: {
+                    Text(AppText.advancedConnectionSettings)
+                        .fontWeight(.medium)
+                }
+                .padding(12)
+            }
         }
+    }
+
+    private var advancedSettings: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(AppText.questionCardNotifications, isOn: Binding(
+                    get: { model.connectionSource.verifiedToolLifecycle },
+                    set: { model.setVerifiedToolLifecycle($0) }
+                ))
+                .disabled(model.connectionStatus != .disconnected)
+                Text(AppText.questionCardNotificationsHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if model.connectionStatus != .disconnected {
+                    Text(AppText.disconnectToChangeConnection)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(AppText.connectionLocation).fontWeight(.medium)
+                Text(AppText.connectionSourceHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(model.hostDescription)
+                Text(model.connectionSource.appPath).textSelection(.enabled)
+                Text("\(AppText.codexConfigurationFolder): \(model.connectionSource.codexHomePath)")
+                    .textSelection(.enabled)
+                HStack {
+                    Button(AppText.selectHost) { model.selectConnectionPath(app: true) }
+                    Button(AppText.selectCodexHome) { model.selectConnectionPath(app: false) }
+                }
+                .disabled(model.connectionStatus != .disconnected)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(AppText.connectionDiagnostics).fontWeight(.medium)
+                Text(AppText.connectionDiagnosticsHelp)
+                    .foregroundStyle(.secondary)
+                Text("\(AppText.stateMessageVersion): \(model.approvalDiagnostics.observedVersion.map(String.init) ?? AppText.notObserved)")
+                Text("\(AppText.lastValidState): \(model.approvalDiagnostics.lastValidStateAt?.formatted() ?? AppText.notObserved)")
+                if let date = model.lastHookAt {
+                    Text("\(AppText.lastNotificationEvent): \(date.formatted())")
+                    Text(model.observedHookTypes.sorted().joined(separator: ", "))
+                        .textSelection(.enabled)
+                }
+                Text(AppText.compatibilityLimitations)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var connectionIcon: String {

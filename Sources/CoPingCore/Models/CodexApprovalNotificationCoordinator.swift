@@ -8,6 +8,8 @@ public enum CodexApprovalNotificationCause: Equatable, Sendable {
 
 public enum CodexApprovalCoordinatorEffect: Equatable, Sendable {
     case scheduleUnknownFallback(key: String)
+    case scheduleReviewTimeout(key: String)
+    case cancelReviewTimeout(key: String)
     case cancelUnknownFallback(key: String)
     case notify(event: CodexEvent, cause: CodexApprovalNotificationCause)
     case followSession(String)
@@ -43,10 +45,18 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
     private var followedSessions: Set<String> = []
     private var waitingSessions: Set<String> = []
     private var waitingTurnBySession: [String: String] = [:]
+    private var waitingNotificationKeyBySession: [String: String] = [:]
     private var waitingEpisodeCountBySession: [String: Int] = [:]
+    // Bounded delivery receipts let a later state observation identify an already
+    // notified approval. They own no timers and are not pending work.
+    private var deliveredEvents: [CodexEvent] = []
     private var monitorHealth: CodexApprovalMonitorHealth = .stopped
 
     public init() {}
+
+    public func isDeliveryEligible(_ event: CodexEvent) -> Bool {
+        deliveredEvents.contains { $0.uniqueKey == event.uniqueKey }
+    }
 
     public var pendingEvents: [CodexEvent] {
         pending.values.map(\.event).sorted {
@@ -62,7 +72,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
     ) -> [CodexApprovalCoordinatorEffect] {
         guard event.type == .permissionRequested else { return [] }
 
-        if isWaiting(sessionID: event.sessionID, turnID: event.turnID) {
+        if isWaiting(sessionID: event.sessionID, turnID: correlatedTurnID(event)) {
             return []
         }
 
@@ -70,7 +80,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         guard pending[key] == nil else { return [] }
         pending[key] = Pending(
             event: event,
-            targetItemID: nil,
+            targetItemID: event.callID,
             fallbackScheduled: false,
             automaticReviewInProgress: false
         )
@@ -106,6 +116,15 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
                 permissionFacts.append(fact)
             }
             associatePendingPermission(with: fact, effects: &effects)
+            // The wait notification can arrive before its native-call evidence.
+            // Reconcile only after this fact establishes a known shared stage.
+            if let turn = fact.turnID, isWaiting(sessionID: fact.sessionID, turnID: turn) {
+                let keys = pending.compactMap { key, candidate in
+                    candidate.event.sessionID == fact.sessionID
+                        && correlatedTurnID(candidate.event) == turn ? key : nil
+                }
+                removePending(keys: keys, effects: &effects)
+            }
 
         case let .automaticReview(targetItemID, status, startedAt):
             let fact = ReviewFact(
@@ -119,6 +138,12 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
                 reviewFacts.append(fact)
             }
             applyReviewFact(fact, effects: &effects)
+            if [.approved, .denied, .timedOut, .aborted].contains(status), let targetItemID {
+                deliveredEvents.removeAll {
+                    $0.sessionID == observation.sessionID && $0.callID == targetItemID
+                        && ($0.turnID == nil || observation.turnID == nil || $0.turnID == observation.turnID)
+                }
+            }
 
         case let .waitingOnApproval(waiting):
             handleWaiting(
@@ -160,11 +185,19 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
             return []
         }
 
-        pending.removeValue(forKey: key)
-        var effects: [CodexApprovalCoordinatorEffect] = [
-            .notify(event: candidate.event, cause: .unknownState)
-        ]
+        var effects: [CodexApprovalCoordinatorEffect] = []
+        removePending(keys: [key], effects: &effects)
+        rememberDelivery(candidate.event)
+        effects.append(.notify(event: candidate.event, cause: .unknownState))
         reconcileFollowers(effects: &effects)
+        return effects
+    }
+
+    public mutating func reviewTimeoutFired(key: String) -> [CodexApprovalCoordinatorEffect] {
+        guard let candidate = pending[key], candidate.automaticReviewInProgress else { return [] }
+        pending[key]?.automaticReviewInProgress = false
+        var effects: [CodexApprovalCoordinatorEffect] = []
+        ensureFallback(for: key, effects: &effects)
         return effects
     }
 
@@ -172,6 +205,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         sessionID: String,
         turnID: String?
     ) -> [CodexApprovalCoordinatorEffect] {
+        guard turnID != nil else { return [] }
         var effects: [CodexApprovalCoordinatorEffect] = []
         let keys = pending.compactMap { key, candidate in
             matchesTurn(
@@ -182,9 +216,15 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
             ) ? key : nil
         }
         removePending(keys: keys, effects: &effects)
+        deliveredEvents = deliveredEvents.filter {
+            !matchesTurn(sessionID: $0.sessionID, turnID: correlatedTurnID($0),
+                         expectedSessionID: sessionID, expectedTurnID: turnID)
+        }
         removeFacts(sessionID: sessionID, turnID: turnID)
-        waitingSessions.remove(sessionID)
-        waitingTurnBySession.removeValue(forKey: sessionID)
+        if waitingTurnBySession[sessionID] == turnID {
+            waitingSessions.remove(sessionID)
+            waitingTurnBySession.removeValue(forKey: sessionID)
+        }
         reconcileFollowers(effects: &effects)
         return effects
     }
@@ -197,6 +237,8 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         waitingSessions.removeAll()
         waitingTurnBySession.removeAll()
         waitingEpisodeCountBySession.removeAll()
+        waitingNotificationKeyBySession.removeAll()
+        deliveredEvents.removeAll()
         monitorHealth = .stopped
         reconcileFollowers(effects: &effects)
         return effects
@@ -225,7 +267,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
             return
         }
         pending[key]?.targetItemID = fact.targetItemID
-        permissionFacts.removeAll { $0 == fact }
+        // Retain bounded native-call evidence for subsequent waiting-state correlation.
     }
 
     private mutating func associatePendingPermission(
@@ -257,7 +299,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         }
 
         pending[key]?.targetItemID = fact.targetItemID
-        permissionFacts.removeAll { $0 == fact }
+        // Retain bounded native-call evidence for subsequent waiting-state correlation.
         applyCachedReview(toPendingKey: key, effects: &effects)
     }
 
@@ -341,6 +383,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
             reviewFacts.removeAll { $0 == fact }
             pending[key]?.automaticReviewInProgress = true
             cancelFallback(for: key, effects: &effects)
+            effects.append(.scheduleReviewTimeout(key: key))
         case .approved, .denied, .timedOut, .aborted:
             reviewFacts.removeAll {
                 $0.sessionID == fact.sessionID
@@ -356,6 +399,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         case .unknown:
             reviewFacts.removeAll { $0 == fact }
             pending[key]?.automaticReviewInProgress = false
+            effects.append(.cancelReviewTimeout(key: key))
             ensureFallback(for: key, effects: &effects)
         }
     }
@@ -368,11 +412,21 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         effects: inout [CodexApprovalCoordinatorEffect]
     ) {
         if !waiting {
+            if let key = waitingNotificationKeyBySession.removeValue(forKey: sessionID) {
+                deliveredEvents.removeAll { $0.uniqueKey == key }
+            }
+            let endedTurn = waitingTurnBySession[sessionID]
             waitingSessions.remove(sessionID)
             waitingTurnBySession.removeValue(forKey: sessionID)
+            if let endedTurn {
+                deliveredEvents = deliveredEvents.filter {
+                    !($0.sessionID == sessionID && correlatedTurnID($0) == endedTurn)
+                }
+                removeFacts(sessionID: sessionID, turnID: endedTurn)
+            }
             return
         }
-        guard !waitingSessions.contains(sessionID) else { return }
+        if waitingSessions.contains(sessionID), waitingTurnBySession[sessionID] == turnID { return }
         waitingSessions.insert(sessionID)
         if let turnID {
             waitingTurnBySession[sessionID] = turnID
@@ -383,10 +437,18 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         let keys = pending.compactMap { key, candidate in
             matchesTurn(
                 sessionID: candidate.event.sessionID,
-                turnID: candidate.event.turnID,
+                turnID: correlatedTurnID(candidate.event),
                 expectedSessionID: sessionID,
                 expectedTurnID: turnID
             ) ? key : nil
+        }
+        let alreadyNotified = deliveredEvents.contains {
+            matchesTurn(sessionID: $0.sessionID, turnID: correlatedTurnID($0),
+                        expectedSessionID: sessionID, expectedTurnID: turnID)
+        }
+        if alreadyNotified {
+            removePending(keys: keys, effects: &effects)
+            return
         }
         if let notificationKey = keys.max(by: {
             guard let left = pending[$0]?.event, let right = pending[$1]?.event else {
@@ -398,8 +460,9 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
             return left.uniqueKey < right.uniqueKey
         }), let event = pending[notificationKey]?.event {
             removePending(keys: keys, effects: &effects)
+            rememberDelivery(event)
+            waitingNotificationKeyBySession[sessionID] = event.uniqueKey
             effects.append(.notify(event: event, cause: .requiresUserAction))
-            removeFacts(sessionID: sessionID, turnID: turnID)
             return
         }
 
@@ -413,8 +476,9 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
             projectName: "Codex",
             timestamp: now
         )
+        rememberDelivery(event)
+        waitingNotificationKeyBySession[sessionID] = event.uniqueKey
         effects.append(.notify(event: event, cause: .requiresUserAction))
-        removeFacts(sessionID: sessionID, turnID: turnID)
     }
 
     private mutating func ensureFallback(
@@ -447,6 +511,7 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
     ) {
         for key in Set(keys).sorted() {
             guard let candidate = pending.removeValue(forKey: key) else { continue }
+            effects.append(.cancelReviewTimeout(key: key))
             if candidate.fallbackScheduled {
                 effects.append(.cancelUnknownFallback(key: key))
             }
@@ -466,10 +531,26 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         followedSessions = desired
     }
 
+    private func correlatedTurnID(_ event: CodexEvent) -> String? {
+        if let turn = event.turnID { return turn }
+        guard let call = event.callID else { return nil }
+        let turns = Set(permissionFacts.compactMap { fact -> String? in
+            guard fact.sessionID == event.sessionID, fact.targetItemID == call else { return nil }
+            return fact.turnID
+        })
+        // Conflicting evidence is ambiguous; never choose a convenient turn.
+        return turns.count == 1 ? turns.first : nil
+    }
+
+    private mutating func rememberDelivery(_ event: CodexEvent) {
+        deliveredEvents.append(event)
+        if deliveredEvents.count > 200 { deliveredEvents.removeFirst(deliveredEvents.count - 200) }
+    }
+
     private func isWaiting(sessionID: String, turnID: String?) -> Bool {
         guard waitingSessions.contains(sessionID) else { return false }
         guard let storedTurnID = waitingTurnBySession[sessionID], let turnID else {
-            return true
+            return false
         }
         return storedTurnID == turnID
     }
@@ -494,19 +575,19 @@ public struct CodexApprovalNotificationCoordinator: Sendable {
         expectedTurnID: String?
     ) -> Bool {
         guard sessionID == expectedSessionID else { return false }
-        guard let turnID, let expectedTurnID else { return true }
+        guard let turnID, let expectedTurnID else { return false }
         return turnID == expectedTurnID
     }
 
     private mutating func removeFacts(sessionID: String, turnID: String?) {
         permissionFacts.removeAll {
             guard $0.sessionID == sessionID else { return false }
-            guard let factTurnID = $0.turnID, let turnID else { return true }
+            guard let factTurnID = $0.turnID, let turnID else { return false }
             return factTurnID == turnID
         }
         reviewFacts.removeAll {
             guard $0.sessionID == sessionID else { return false }
-            guard let factTurnID = $0.turnID, let turnID else { return true }
+            guard let factTurnID = $0.turnID, let turnID else { return false }
             return factTurnID == turnID
         }
     }

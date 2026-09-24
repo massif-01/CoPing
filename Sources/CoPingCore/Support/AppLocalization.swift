@@ -426,8 +426,8 @@ public enum AppText {
         language: AppLanguage = .current
     ) -> String {
         language.text(
-            chinese: "暂时无法判断 Codex 是否会自动处理，当前会提醒所有审批。",
-            english: "CoPing temporarily cannot tell whether Codex will handle an approval, so all approvals will be notified."
+            chinese: "精确过滤暂不可用，已收到的审批将采用保守提醒。",
+            english: "Precise filtering is unavailable. Received approvals will use conservative notifications."
         )
     }
     public static var launchAtLogin: String {
@@ -929,6 +929,36 @@ public enum AppText {
             english: "Codex is waiting for your approval"
         )
     }
+    public static var hookConfigurationConflict: String {
+        text("Hook 配置已被其他进程修改，请重试；未覆盖新内容。", "Hooks changed in another process. Retry; newer edits were not overwritten.")
+    }
+    public static var compatibilityLimitations: String {
+        text("已连接表示 CoPing 能收到 Codex 的消息。Codex 停下后又继续工作时，完成提醒仍可能提前出现。", "Connected means CoPing can receive events from Codex. Completion notifications may still arrive early if Codex pauses and then continues working.")
+    }
+    public static var stateMessageVersion: String { text("已观察状态消息版本", "Observed state message version") }
+    public static var lastValidState: String { text("最后有效状态消息", "Last valid state message") }
+    public static var notObserved: String { text("未观察到", "Not observed") }
+    public static var codexApplication: String { text("Codex 应用", "Codex app") }
+    public static var advancedConnectionSettings: String { text("高级设置与诊断", "Advanced settings & diagnostics") }
+    public static var questionCardNotifications: String { text("新版问题卡片提醒", "New question card notifications") }
+    public static var questionCardNotificationsHelp: String {
+        text("Codex 显示新版问题卡片、但手机没有提醒时，可尝试开启。需要较新的 Codex 版本。", "Try enabling this if Codex shows a new question card but your phone receives no notification. Requires a recent Codex version.")
+    }
+    public static var disconnectToChangeConnection: String {
+        text("如需修改，请先断开连接，修改后重新连接。", "To make changes, disconnect first, then reconnect afterward.")
+    }
+    public static var connectionLocation: String { text("连接位置", "Connection location") }
+    public static var codexConfigurationFolder: String { text("Codex 配置文件夹", "Codex configuration folder") }
+    public static var connectionDiagnostics: String { text("诊断信息", "Diagnostics") }
+    public static var connectionDiagnosticsHelp: String {
+        text("排查收不到通知等问题时，可将这里的信息提供给开发者。", "Share this information with the developer when troubleshooting missing notifications or connection issues.")
+    }
+    public static var lastNotificationEvent: String { text("最近收到通知事件", "Last notification event received") }
+    public static var selectHost: String { text("选择 Codex 应用…", "Choose Codex app…") }
+    public static var selectCodexHome: String { text("选择配置文件夹…", "Choose configuration folder…") }
+    public static var connectionSourceHelp: String {
+        text("通常无需修改。仅在 Codex 安装或配置文件保存在其他位置时调整。", "Usually no changes are needed. Adjust these only if your Codex app or configuration is stored elsewhere.")
+    }
     public static var questionNotificationTitle: String {
         "CoPing"
     }
@@ -938,13 +968,13 @@ public enum AppText {
     ) -> String {
         if let taskTitle = notificationTaskTitle(taskTitle) {
             return language.text(
-                chinese: "Codex [\(taskTitle)] 等待回答",
-                english: "Codex [\(taskTitle)] is waiting for an answer"
+                chinese: "Codex [\(taskTitle)] 有问题待查看",
+                english: "Codex [\(taskTitle)] has a question to review"
             )
         }
         return language.text(
-            chinese: "Codex 等待回答",
-            english: "Codex is waiting for an answer"
+            chinese: "Codex 有问题待查看",
+            english: "Codex has a question to review"
         )
     }
 
@@ -981,6 +1011,8 @@ public enum AppText {
             label = text("权限请求", "Permission request")
         case "PreToolUse":
             label = text("普通问题", "Question")
+        case "PostToolUse":
+            label = text("问题状态", "Question state")
         default:
             label = event
         }

@@ -24,14 +24,27 @@ public final class CodexApprovalStateDecoder {
     public func decodeJSONObject(
         _ root: [String: Any]
     ) throws -> [CodexApprovalObservation] {
+        let turns = turnIDsBySessionAndEntity
+        let waiting = waitingOnApprovalBySession
+        let active = activeTurnIDBySession
+        do { return try decodeValidated(root) } catch {
+            turnIDsBySessionAndEntity = turns
+            waitingOnApprovalBySession = waiting
+            activeTurnIDBySession = active
+            throw error
+        }
+    }
+
+    private func decodeValidated(_ root: [String: Any]) throws -> [CodexApprovalObservation] {
         guard
             root["type"] as? String == "broadcast",
             root["method"] as? String == "thread-stream-state-changed"
         else {
             throw CodexApprovalStateDecodeError.invalidMessage
         }
-        let version = (root["version"] as? NSNumber)?.intValue
-        guard version == 11 else {
+        let rawVersion = root["version"] as? NSNumber
+        let version = rawVersion?.intValue
+        guard version == 11, rawVersion?.doubleValue == 11 else {
             throw CodexApprovalStateDecodeError.unsupportedVersion(version)
         }
         guard
@@ -49,12 +62,21 @@ public final class CodexApprovalStateDecoder {
             guard let state = change["conversationState"] as? [String: Any] else {
                 throw CodexApprovalStateDecodeError.invalidMessage
             }
-            return decodeSnapshot(state, sessionID: sessionID)
+            _ = try waitingOnApproval(in: state["threadRuntimeStatus"])
+            try validateContent(state)
+            return try decodeSnapshot(state, sessionID: sessionID)
         case "patches":
             guard let patches = change["patches"] as? [[String: Any]] else {
                 throw CodexApprovalStateDecodeError.invalidMessage
             }
-            return decodePatches(patches, sessionID: sessionID)
+            for patch in patches {
+                guard let op = patch["op"] as? String, ["add", "replace", "remove"].contains(op),
+                    !pathComponents(patch["path"]).isEmpty else {
+                    throw CodexApprovalStateDecodeError.invalidMessage
+                }
+                if let value = patch["value"] { try validateContent(value) }
+            }
+            return try decodePatches(patches, sessionID: sessionID)
         default:
             throw CodexApprovalStateDecodeError.invalidMessage
         }
@@ -75,7 +97,7 @@ public final class CodexApprovalStateDecoder {
     private func decodeSnapshot(
         _ state: [String: Any],
         sessionID: String
-    ) -> [CodexApprovalObservation] {
+    ) throws -> [CodexApprovalObservation] {
         var observations: [CodexApprovalObservation] = []
         var turnIDsByEntity: [String: String] = [:]
         var latestActiveTurn: (id: String, startedAt: Double)?
@@ -101,6 +123,7 @@ public final class CodexApprovalStateDecoder {
                     }
                 }
 
+                if turn["status"] as? String == "inProgress" {
                 observations.append(
                     contentsOf: decodeTurnContent(
                         turn,
@@ -109,6 +132,7 @@ public final class CodexApprovalStateDecoder {
                         source: .snapshot
                     )
                 )
+                }
             }
         }
 
@@ -119,7 +143,7 @@ public final class CodexApprovalStateDecoder {
             activeTurnIDBySession.removeValue(forKey: sessionID)
         }
 
-        let waiting = waitingOnApproval(in: state["threadRuntimeStatus"])
+        let waiting = try waitingOnApproval(in: state["threadRuntimeStatus"])
         waitingOnApprovalBySession[sessionID] = waiting
         observations.append(
             CodexApprovalObservation(
@@ -135,7 +159,7 @@ public final class CodexApprovalStateDecoder {
     private func decodePatches(
         _ patches: [[String: Any]],
         sessionID: String
-    ) -> [CodexApprovalObservation] {
+    ) throws -> [CodexApprovalObservation] {
         var observations: [CodexApprovalObservation] = []
 
         for patch in patches {
@@ -173,15 +197,14 @@ public final class CodexApprovalStateDecoder {
                 let previous = waitingOnApprovalBySession[sessionID] ?? false
                 let waiting: Bool
                 if let dictionary = value as? [String: Any] {
-                    waiting = waitingOnApproval(in: dictionary)
+                    waiting = try waitingOnApproval(in: dictionary)
                 } else if let flags = value as? [String] {
                     waiting = flags.contains("waitingOnApproval")
                 } else if value as? String == "waitingOnApproval" {
                     waiting = operation != "remove"
-                } else if operation == "remove" && path.contains("activeFlags") {
-                    waiting = false
                 } else {
-                    waiting = previous
+                    // Removing an indexed flag without its previous value is ambiguous.
+                    throw CodexApprovalStateDecodeError.invalidMessage
                 }
 
                 waitingOnApprovalBySession[sessionID] = waiting
@@ -319,9 +342,42 @@ public final class CodexApprovalStateDecoder {
         )
     }
 
-    private func waitingOnApproval(in value: Any?) -> Bool {
-        guard let status = value as? [String: Any] else { return false }
-        return (status["activeFlags"] as? [String] ?? []).contains("waitingOnApproval")
+    private func waitingOnApproval(in value: Any?) throws -> Bool {
+        guard let status = value as? [String: Any],
+            let flags = status["activeFlags"] as? [String] else {
+            throw CodexApprovalStateDecodeError.invalidMessage
+        }
+        return flags.contains("waitingOnApproval")
+    }
+
+    private func validateContent(_ value: Any) throws {
+        if let dictionary = value as? [String: Any] {
+            if (dictionary["eventName"] as? String)?.lowercased().filter(\.isLetter) == "permissionrequest" {
+                guard let id = dictionary["id"] as? String, targetItemID(fromHookRunID: id) != nil,
+                    number(dictionary["startedAt"]) != nil else {
+                    throw CodexApprovalStateDecodeError.invalidMessage
+                }
+            }
+            if dictionary["type"] as? String == "automaticApprovalReview" {
+                guard dictionary["status"] is String,
+                    number(dictionary["startedAtMs"]) != nil else {
+                    throw CodexApprovalStateDecodeError.invalidMessage
+                }
+            }
+            if let flags = dictionary["activeFlags"], !(flags is [String]) {
+                throw CodexApprovalStateDecodeError.invalidMessage
+            }
+            // Only traverse known structural fields; never inspect free text or tool arguments.
+            for key in ["turnHistory", "history", "entitiesByKey", "items", "hookRuns", "run"] {
+                if let child = dictionary[key] {
+                    if key == "entitiesByKey", let entities = child as? [String: Any] {
+                        for entity in entities.values { try validateContent(entity) }
+                    } else { try validateContent(child) }
+                }
+            }
+        } else if let array = value as? [Any] {
+            for child in array { try validateContent(child) }
+        }
     }
 
     private func targetItemID(fromHookRunID runID: String) -> String? {
